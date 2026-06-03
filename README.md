@@ -2,10 +2,17 @@
 
 Bot de Microsoft Rewards auto-arrancable, multi-usuario y con auto-reparación de selectores.
 
+Repo: https://github.com/Jabry-Bot/ms-rewards-bot
+
 ## Instalación (cualquier usuario, Windows 10/11)
 
-1. Clona o descarga este repo.
-2. Doble-click en `setup.bat`.
+```cmd
+git clone https://github.com/Jabry-Bot/ms-rewards-bot.git
+cd ms-rewards-bot
+setup.bat
+```
+
+O descarga el ZIP desde GitHub y ejecuta `setup.bat`. Es **importante clonar con git** si quieres recibir actualizaciones automáticas — el bot hace `git pull` antes de cada ejecución cuando hay una versión nueva.
 
 El instalador hace todo el trabajo:
 
