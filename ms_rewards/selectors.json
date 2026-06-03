@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "dashboard": {
+    "card_link": "mee-rewards-daily-set-item-component a, mee-rewards-more-activities-card-item a, mee-rewards-punch-card a, .rewards-card-container a[data-bi-id]",
+    "card_container": "mee-rewards-daily-set-item-component, mee-rewards-more-activities-card-item, mee-rewards-punch-card, mee-card",
+    "complete_badge": "span.mee-icon-SkypeCircleCheck"
+  },
+  "punch_card": {
+    "piece": "a.offer-cta:not(.complete), a.punchcard-row:not(.complete), .punchcard-row a[href]:not([class*='complete']), ul.punchcard-row li a, .rewards-userTile-wrapper a",
+    "claim_button": "a.punchcard-claim, button.punchcard-claim, a[data-bi-id*='Claim'], a[data-bi-name*='claim'], .punchcard-actions a"
+  },
+  "claim": {
+    "anywhere": "a[data-bi-id*='Claim'], a[data-bi-name*='claim'], button[data-bi-id*='Claim'], button[data-bi-name*='claim'], a.streak-claim, button.streak-claim, .punchcard-claim, a[aria-label*='Reclamar'], a[aria-label*='Claim'], button[aria-label*='Reclamar'], button[aria-label*='Claim']",
+    "text_keywords_es": "reclamar,reclama,conseguir,canjear,obtener oferta",
+    "text_keywords_en": "claim,get the offer,get offer,redeem"
+  },
+  "quiz": {
+    "this_or_that": "#rqAnswerOption0, #rqAnswerOption1",
+    "options": ".rqOptionWrap, .rq_option",
+    "poll": ".bt_PollRadio, .b_pollOption",
+    "next": "a.wk_button, input[type='button'][value='Next']",
+    "question": ".rqPageQuestion",
+    "interactive_indicators": "#rqAnswerOption0, .rqOptionWrap, .bt_PollRadio, .b_pollOption, .rqPageQuestion"
+  },
+  "bing": {
+    "cookies_accept": "#bnp_btn_accept, button#bnp_btn_accept, button[aria-label*='Accept']",
+    "organic_result": "li.b_algo h2 a",
+    "signed_in_indicator": "#id_n, #mectrl_currentAccount_primary, #id_a"
+  },
+  "rewards": {
+    "signin_button": "a[href*='login.live.com'], a[href*='login.microsoftonline.com'], #raf-signin, .signInButton"
+  },
+  "login": {
+    "email_input": "input[type='email'], #i0116",
+    "email_next": "#idSIButton9, input[type='submit'][value='Siguiente'], input[type='submit'][value='Next']",
+    "password_input": "input[type='password'], #i0118",
+    "password_submit": "#idSIButton9, input[type='submit'][value='Iniciar sesión'], input[type='submit'][value='Sign in']",
+    "stay_signed_in_yes": "#idSIButton9, input[type='submit'][value='Sí'], input[type='submit'][value='Yes']",
+    "twofa_indicator": "#idDiv_SAOTCS_Title, #idDiv_SAOTCC_Title, #idDiv_SAASDS_Title, #displaySign, input[name='otc']"
+  }
+}

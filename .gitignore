@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+
+ms_rewards/.venv/
+ms_rewards/logs/
+ms_rewards/state/*
+!ms_rewards/state/.gitkeep
+
+# config local de IDE / Claude (no se distribuye)
+.idea/
+.claude/
+
+# diagnostic / temp scripts
+_*.py
