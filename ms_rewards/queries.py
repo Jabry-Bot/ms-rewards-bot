@@ -90,26 +90,138 @@ _BASE_QUERIES: list[str] = [
     "interes hipoteca media",
     "trabajos remotos desde casa",
     "como pedir cita en hacienda",
+    # --- Ampliación del pool (más diversidad de temas) ---
+    # Tiempo / naturaleza
+    "previsión meteorológica fin de semana",
+    "cuando empieza el verano",
+    "fases de la luna este mes",
+    "temperatura del mar hoy",
+    "cuando cambia la hora",
+    # Recetas y comida
+    "bizcocho esponjoso casero",
+    "salsa carbonara autentica",
+    "croquetas de jamon caseras",
+    "gazpacho andaluz receta",
+    "pollo al horno con patatas",
+    "arroz caldoso de marisco",
+    "postres faciles sin horno",
+    "pan de centeno casero",
+    "menu semanal saludable",
+    "tortitas americanas receta",
+    # Tecnología
+    "como acelerar el movil android",
+    "mejor portatil calidad precio",
+    "diferencia wifi 5 y wifi 6",
+    "como recuperar fotos borradas",
+    "que es la computacion cuantica",
+    "comparativa iphone y android",
+    "como proteger mi cuenta de google",
+    "mejores auriculares inalambricos",
+    "que es una vpn y para que sirve",
+    "como bloquear llamadas spam",
+    # Deporte
+    "calendario liga 2026",
+    "quien gano el balon de oro",
+    "nba resultados ayer",
+    "mundial de atletismo fechas",
+    "formula 1 proxima carrera",
+    "clasificacion mundial tenis",
+    "horario maraton de valencia",
+    # Noticias / cultura
+    "estrenos disney plus este mes",
+    "premios oscar nominados",
+    "mejores libros de 2026",
+    "exposiciones madrid este mes",
+    "conciertos barcelona proximos",
+    "que ver en hbo max",
+    "documentales recomendados netflix",
+    # Viajes
+    "que ver en oporto en 3 dias",
+    "mejores playas de cadiz",
+    "ruta del cares asturias",
+    "vuelos baratos a paris",
+    "que llevar a un viaje a noruega",
+    "pueblos bonitos de españa",
+    "visitar la alhambra entradas",
+    "mejor epoca para viajar a tailandia",
+    # Salud y bienestar
+    "beneficios de caminar a diario",
+    "cuanta agua beber al dia",
+    "alimentos ricos en hierro",
+    "ejercicios para fortalecer rodillas",
+    "como mejorar el sueño",
+    "que es el ayuno intermitente",
+    "estiramientos antes de correr",
+    "propiedades del jengibre",
+    # Hogar y bricolaje
+    "como eliminar la humedad de casa",
+    "trucos para limpiar cristales",
+    "como montar una estanteria",
+    "plantas que purifican el aire",
+    "como ahorrar en la factura de la luz",
+    "quitar olor a humedad de la ropa",
+    "como desatascar un fregadero",
+    # Curiosidades / educativas
+    "por que bostezamos",
+    "cuanto mide la torre eiffel",
+    "como se forman los arcoiris",
+    "que es el agujero negro",
+    "biografia de leonardo da vinci",
+    "cuantos huesos tiene el cuerpo humano",
+    "por que el mar es salado",
+    "que es el efecto invernadero",
+    "historia de la antigua roma",
+    # Compras / consumo
+    "mejores moviles calidad precio 2026",
+    "comparar seguros de coche",
+    "ofertas en electrodomesticos",
+    "como devolver un pedido online",
+    "mejor television 4k del momento",
+    "donde comprar zapatillas baratas",
+    # Trabajo / dinero / trámites
+    "como hacer un curriculum",
+    "que es el plan de pensiones",
+    "como darse de alta autonomo",
+    "subsidio por desempleo requisitos",
+    "como calcular el finiquito",
+    "que es la inflacion explicado",
+    "ayudas para autonomos 2026",
 ]
 
 _PREFIXES = ["", "", "", "", "que es ", "como ", "donde ", "cual es "]
 _SUFFIXES = ["", "", "", "", " 2026", " explicado", " paso a paso", " gratis"]
 
 
-def _maybe_variant(q: str) -> str:
-    """Aplica una variación leve a la query — distinto cada día."""
-    # 25% prob de añadir prefijo
-    if random.random() < 0.25 and not any(q.startswith(p) for p in _PREFIXES if p):
-        q = random.choice([p for p in _PREFIXES if p]) + q
-    # 20% prob de sufijo
-    if random.random() < 0.20:
-        q = q + random.choice([s for s in _SUFFIXES if s])
+_NONEMPTY_PREFIXES = [p for p in _PREFIXES if p]
+_NONEMPTY_SUFFIXES = [s for s in _SUFFIXES if s]
+
+
+def _maybe_variant(
+    q: str,
+    rng: random.Random,
+    *,
+    prob_prefix: float = 0.28,
+    prob_suffix: float = 0.55,
+) -> str:
+    """
+    Aplica una variación a la query usando el `rng` recibido (con seed),
+    no el `random` global — así la generación es determinista por día pero
+    varía de un día a otro. Antes usaba `random` global, lo que hacía que
+    las variantes apenas se aprovecharan y el pool efectivo se redujera a
+    las bases "peladas".
+    """
+    if rng.random() < prob_prefix and not any(q.startswith(p) for p in _NONEMPTY_PREFIXES):
+        q = rng.choice(_NONEMPTY_PREFIXES) + q
+    if rng.random() < prob_suffix:
+        q = q + rng.choice(_NONEMPTY_SUFFIXES)
     return q.strip()
 
 
 def generate_queries(n: int, *, seed: int | None = None) -> list[str]:
     """
-    Devuelve N queries únicas. Si N > pool, repite con variaciones distintas.
+    Devuelve N queries únicas. Aplica variantes de forma agresiva (≈85%)
+    para aprovechar las ~3000+ combinaciones posibles en vez de rotar solo
+    sobre las bases, reduciendo drásticamente la repetición entre días.
     """
     rng = random.Random(seed if seed is not None else date.today().toordinal())
     pool = _BASE_QUERIES.copy()
@@ -119,11 +231,18 @@ def generate_queries(n: int, *, seed: int | None = None) -> list[str]:
     seen: set[str] = set()
     while len(out) < n:
         base = pool[i % len(pool)]
-        # Cuando damos otra vuelta al pool, forzamos variación
+        # Variante con alta probabilidad; forzada al dar otra vuelta al pool.
         force_variant = i >= len(pool)
-        q = _maybe_variant(base) if (force_variant or random.random() < 0.35) else base
+        q = _maybe_variant(base, rng) if (force_variant or rng.random() < 0.85) else base
         if q in seen:
-            q = _maybe_variant(base + " " + str(rng.randint(2020, 2026)))
+            # Buscar una variante distinta antes de recurrir al fallback de año
+            for _ in range(8):
+                cand = _maybe_variant(base, rng, prob_prefix=0.7, prob_suffix=0.7)
+                if cand not in seen:
+                    q = cand
+                    break
+            else:
+                q = _maybe_variant(base + " " + str(rng.randint(2020, 2026)), rng)
         seen.add(q)
         out.append(q)
         i += 1
@@ -189,9 +308,15 @@ def generate_mobile_queries(n: int, *, seed: int | None = None) -> list[str]:
             q = base_pool[bi % len(base_pool)]
             bi += 1
             if bi > len(base_pool) and rng.random() < 0.5:
-                q = _maybe_variant(q)
+                q = _maybe_variant(q, rng)
         if q in seen:
-            q = _maybe_variant(q + " " + str(rng.randint(2020, 2026)))
+            for _ in range(8):
+                cand = _maybe_variant(q, rng, prob_prefix=0.7, prob_suffix=0.7)
+                if cand not in seen:
+                    q = cand
+                    break
+            else:
+                q = _maybe_variant(q + " " + str(rng.randint(2020, 2026)), rng)
         seen.add(q)
         out.append(q)
     return out
