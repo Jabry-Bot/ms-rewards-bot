@@ -57,6 +57,14 @@ cd ms_rewards
 .venv\Scripts\python.exe run.py --kill     # mata chrome.exe del bot
 ```
 
+## Cambiar de cuenta
+
+```cmd
+switch_account.bat
+```
+
+Desconecta la cuenta actual (cierra el Chrome del bot, borra la sesión guardada y las credenciales cifradas) y lanza el login para una cuenta nueva. Pide confirmación antes de borrar nada. Re-ejecutar `setup.bat` **no** cambia la cuenta por sí solo, porque detecta la sesión vieja como activa — usa este script.
+
 ## Desinstalar
 
 ```
