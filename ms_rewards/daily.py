@@ -467,15 +467,21 @@ async def run_daily(context: BrowserContext) -> int:
         return 0
 
     done = 0
+    simple_click_done = 0
     for c in cards:
         log.info("→ abriendo card: %s", (c.get("title") or "")[:60])
-        # Click en la card abre nueva pestaña → escuchamos
-        new_page: Page | None = None
-        # El click se hace por JS contra el MISMO nodelist que usa
-        # _list_pending_cards, así el índice está siempre alineado (antes se
-        # mezclaban dos selectores distintos — card-elements vs anclas — y el
-        # nth() acababa pulsando la card equivocada). El click va DENTRO de
-        # expect_page para no perder el evento de la pestaña que se abre.
+
+        # Hay tres tipos de cards en MS Rewards:
+        #   A) Card que abre PESTAÑA NUEVA con quiz/poll/artículo → flujo normal.
+        #   B) Card que NAVEGA EN LA MISMA PESTAÑA al destino → poco frecuente.
+        #   C) Card de "SIMPLE CLICK ACREDITA": el click acredita puntos
+        #      directamente sin abrir pestaña ni navegar (p.ej. "Reclama X
+        #      puntos por activar la barra", "Comparte con un amigo", banners
+        #      promo). Antes las contábamos como fallo porque expect_page daba
+        #      timeout — pero los puntos sí se acreditaban.
+        #
+        # Distinguimos comparando la cantidad de pestañas / la URL antes y
+        # después del click.
         _CLICK_JS = """([idx, containerSel]) => {
             const cards = document.querySelectorAll(containerSel);
             const card = cards[idx];
@@ -487,17 +493,55 @@ async def run_daily(context: BrowserContext) -> int:
             return true;
         }"""
         container_sel = selectors.get("dashboard.card_container")
+        pages_before = len(context.pages)
+        url_before = dashboard.url
+
+        # expect_page con timeout corto: si tras 3.5s no se abrió pestaña,
+        # asumimos card tipo B/C y seguimos. Si se abre, la procesamos.
+        new_page: Page | None = None
         try:
-            async with context.expect_page(timeout=10_000) as new_page_info:
+            async with context.expect_page(timeout=3_500) as new_page_info:
                 clicked = await dashboard.evaluate(_CLICK_JS, [c["index"], container_sel])
                 if not clicked:
-                    # Salta esta card sin esperar el timeout de expect_page;
-                    # el except de abajo lo captura y hace continue.
                     raise RuntimeError(f"card idx={c['index']} sin link clickable")
             new_page = await new_page_info.value
         except Exception as exc:
-            log.warning("no se abrió pestaña para la card: %s", exc)
-            continue
+            msg = str(exc)
+            if "sin link clickable" in msg:
+                # Card no tenía link real (raro tras filtros). Saltamos.
+                log.debug("card sin link clickable, saltando: %s", c.get("title", "")[:40])
+                continue
+            # Click hecho pero ninguna pestaña nueva. Determinamos qué pasó:
+            await sleep_jitter(0.8, 1.6)
+            pages_after = len(context.pages)
+            url_after = dashboard.url
+            if pages_after > pages_before:
+                # Race: la pestaña sí se abrió pero el expect_page expiró
+                # justo antes. Recogerla manualmente.
+                new_page = context.pages[-1]
+            elif url_after != url_before:
+                # Tipo B: la card navegó en la misma pestaña.
+                log.info("card navegó en la misma pestaña; procesando como actividad")
+                try:
+                    await _handle_card_tab(dashboard, context)
+                    done += 1
+                except Exception as exc2:
+                    log.warning("card en misma pestaña falló: %s", exc2)
+                # Volver al dashboard
+                try:
+                    await safe_goto(dashboard, REWARDS_URL, attempts=3, timeout=20_000)
+                    await sleep_jitter(2.0, 4.0)
+                except Exception:
+                    pass
+                continue
+            else:
+                # Tipo C: simple click — los puntos se acreditan sin más.
+                # Lo contamos como completada (era el bug: antes la perdíamos).
+                log.info("card de simple-click: puntos acreditados sin pestaña")
+                simple_click_done += 1
+                # Pequeña pausa entre cards para no abrumar al dashboard
+                await sleep_jitter(*config.DELAYS["between_cards"])
+                continue
 
         if new_page is None:
             continue
@@ -535,5 +579,12 @@ async def run_daily(context: BrowserContext) -> int:
     except Exception as exc:
         log.warning("reclamación en dashboard falló: %s", exc)
 
-    log.info("daily set: %d cards completadas", done)
-    return done
+    total = done + simple_click_done
+    if simple_click_done:
+        log.info(
+            "daily set: %d cards completadas (%d con sub-actividad + %d de simple-click)",
+            total, done, simple_click_done,
+        )
+    else:
+        log.info("daily set: %d cards completadas", total)
+    return total
