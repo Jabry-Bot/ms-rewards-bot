@@ -161,9 +161,16 @@ async def launch() -> AsyncIterator[BrowserContext]:
     if config.WINDOW_SIZE:
         launch_args.append(f"--window-size={config.WINDOW_SIZE}")
 
-    async with async_playwright() as pw:
-        log.info("lanzando Chrome (channel=chrome, profile=%s)", user_data)
-        context = await pw.chromium.launch_persistent_context(
+    # Antes de lanzar, asegúrate de que NADIE más tiene el perfil tomado:
+    # un chrome.exe del bot colgado de una corrida previa (o dos triggers de
+    # la Scheduled Task solapados — logon + diario) bloquea el user-data-dir
+    # y hace que launch_persistent_context arranque Chrome y se cierre al
+    # instante ("Target page, context or browser has been closed").
+    shutdown_chrome()
+    _clear_profile_locks()
+
+    async def _open(pw):
+        return await pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data),
             channel="chrome",
             headless=False,
@@ -195,6 +202,20 @@ async def launch() -> AsyncIterator[BrowserContext]:
                 "--no-sandbox",
             ],
         )
+
+    async with async_playwright() as pw:
+        log.info("lanzando Chrome (channel=chrome, profile=%s)", user_data)
+        try:
+            context = await _open(pw)
+        except Exception as exc:
+            # Reintento: a veces el lock tarda en liberarse tras matar el
+            # Chrome viejo. Limpiamos de nuevo, esperamos y volvemos a probar
+            # una vez antes de rendirnos.
+            log.warning("launch falló (%s) — limpiando perfil y reintentando", exc)
+            shutdown_chrome()
+            _clear_profile_locks()
+            await asyncio.sleep(2.0)
+            context = await _open(pw)
         log.info("contexto persistente listo (%d página/s)", len(context.pages))
 
         # OJO: NO usar context.add_init_script(...) aquí. En patchright rompe
@@ -230,3 +251,23 @@ def shutdown_chrome() -> None:
         )
     except Exception as exc:
         log.warning("shutdown_chrome: %s", exc)
+
+
+def _clear_profile_locks() -> None:
+    """
+    Borra los ficheros Singleton* del perfil que Chrome usa como lock de
+    instancia única. Si una corrida previa murió sin cerrar limpio (PC
+    suspendido, cierre forzado), estos locks quedan y hacen que el siguiente
+    launch_persistent_context arranque Chrome y se cierre de inmediato
+    ("Target page, context or browser has been closed"). En Windows son
+    ficheros normales (no symlinks como en Linux), así que se pueden borrar.
+    """
+    user_data = Path(config.USER_DATA_DIR)
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        lock = user_data / name
+        try:
+            if lock.exists():
+                lock.unlink()
+                log.info("lock de perfil eliminado: %s", lock)
+        except Exception as exc:
+            log.warning("no se pudo borrar %s: %s", lock, exc)
