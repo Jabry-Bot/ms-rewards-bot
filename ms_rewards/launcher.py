@@ -235,6 +235,12 @@ async def launch() -> AsyncIterator[BrowserContext]:
 def shutdown_chrome() -> None:
     """Mata cualquier chrome.exe colgado del user-data-dir del bot."""
     try:
+        # OJO: Chrome lanza varios procesos hijo (renderer, gpu, utility), todos
+        # con el --user-data-dir en su CommandLine. Al matar el padre, los hijos
+        # mueren solos; por eso un Stop-Process -Id sobre cada PID falla con
+        # "No se encuentra ningún proceso..." en los que ya murieron. Hay que
+        # silenciar ese error (-ErrorAction SilentlyContinue) o ensucia la
+        # consola del setup con volcados de PowerShell aparatosos pero inocuos.
         subprocess.run(
             [
                 "powershell",
@@ -243,11 +249,13 @@ def shutdown_chrome() -> None:
                 (
                     "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
                     f"Where-Object {{ $_.CommandLine -like '*{config.USER_DATA_DIR}*' }} | "
-                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+                    "-ErrorAction SilentlyContinue }"
                 ),
             ],
             timeout=10,
             check=False,
+            capture_output=True,  # no volcar nada a la consola pase lo que pase
         )
     except Exception as exc:
         log.warning("shutdown_chrome: %s", exc)
