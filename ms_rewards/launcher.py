@@ -151,6 +151,16 @@ async def launch() -> AsyncIterator[BrowserContext]:
         "--disable-blink-features=AutomationControlled",
     ]
 
+    # Arranca la ventana fuera del área visible para no molestar al usuario
+    # (p. ej. si está jugando). Posición muy negativa = fuera de cualquier
+    # monitor. OJO: posicionar fuera de pantalla NO cambia visibilityState
+    # (sigue "visible"), así que Bing acredita igual — a diferencia de
+    # minimizar, que pondría la página en "hidden" y dejaría de contar.
+    if config.WINDOW_POSITION:
+        launch_args.append(f"--window-position={config.WINDOW_POSITION}")
+    if config.WINDOW_SIZE:
+        launch_args.append(f"--window-size={config.WINDOW_SIZE}")
+
     async with async_playwright() as pw:
         log.info("lanzando Chrome (channel=chrome, profile=%s)", user_data)
         context = await pw.chromium.launch_persistent_context(
