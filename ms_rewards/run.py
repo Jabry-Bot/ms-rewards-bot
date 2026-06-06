@@ -42,6 +42,52 @@ from searches_mobile import run_mobile_searches
 from daily import run_daily
 
 
+class _SingleInstance:
+    """
+    Lock de instancia única por perfil (USER_ID), vía named mutex de Windows.
+
+    Evita que dos corridas se ejecuten a la vez sobre el mismo perfil — el
+    caso típico es que los dos triggers de la Scheduled Task (logon + diario)
+    disparen casi simultáneamente y choquen en el user-data-dir de Chrome.
+    El SO libera el mutex solo cuando el proceso muere, así que no quedan
+    locks stale aunque la corrida se mate a la fuerza.
+
+    Si pywin32 no está disponible, degrada a no-op (mejor seguir corriendo
+    sin lock que abortar). El launcher ya limpia locks de Chrome como red de
+    seguridad de segundo nivel.
+    """
+
+    def __init__(self) -> None:
+        self._handle = None
+        self._held = False
+
+    def acquire(self) -> bool:
+        try:
+            import win32event  # type: ignore
+            import winerror  # type: ignore
+        except Exception:
+            logging.getLogger("run").info(
+                "pywin32 no disponible — sin lock de instancia única"
+            )
+            return True
+        safe = "".join(c if c.isalnum() else "_" for c in config.USER_ID)
+        name = f"MsRewardsBot_{safe}"
+        self._handle = win32event.CreateMutex(None, True, name)
+        if win32event.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            return False
+        self._held = True
+        return True
+
+    def release(self) -> None:
+        if self._handle is not None:
+            try:
+                import win32api  # type: ignore
+                win32api.CloseHandle(self._handle)
+            except Exception:
+                pass
+            self._handle = None
+
+
 def _setup_logging() -> None:
     # Forzar UTF-8 en stdout/stderr — Windows por defecto usa cp1252 y revienta
     # con cualquier carácter no-Latin1 (símbolos como →, tildes en títulos de
@@ -260,6 +306,21 @@ def main() -> int:
         _setup_mode()
         return 0
 
+    # Lock de instancia única: si ya hay otra corrida sobre este perfil
+    # (típicamente los dos triggers de la Scheduled Task solapándose), salimos
+    # limpiamente en vez de pelearnos por el perfil de Chrome.
+    instance = _SingleInstance()
+    if not instance.acquire():
+        log.info("ya hay otra corrida en marcha para este perfil — saliendo")
+        return 0
+
+    try:
+        return _main_locked(args, log)
+    finally:
+        instance.release()
+
+
+def _main_locked(args, log) -> int:
     # 1) Auto-update (puede relanzar el proceso)
     if not args.no_update:
         try:
