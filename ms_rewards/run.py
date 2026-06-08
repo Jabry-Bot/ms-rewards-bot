@@ -62,21 +62,29 @@ class _SingleInstance:
         self._held = False
 
     def acquire(self) -> bool:
+        log = logging.getLogger("run")
         try:
+            import win32api  # type: ignore  (GetLastError vive aquí, NO en win32event)
             import win32event  # type: ignore
             import winerror  # type: ignore
         except Exception:
-            logging.getLogger("run").info(
-                "pywin32 no disponible — sin lock de instancia única"
-            )
+            log.info("pywin32 no disponible — sin lock de instancia única")
             return True
-        safe = "".join(c if c.isalnum() else "_" for c in config.USER_ID)
-        name = f"MsRewardsBot_{safe}"
-        self._handle = win32event.CreateMutex(None, True, name)
-        if win32event.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            return False
-        self._held = True
-        return True
+        # Cualquier fallo del lock NO debe tumbar la corrida: el lock es solo
+        # una optimización para no solapar dos triggers. Si algo va mal aquí,
+        # degradamos a no-op y seguimos (el launcher limpia locks como red de
+        # seguridad de segundo nivel).
+        try:
+            safe = "".join(c if c.isalnum() else "_" for c in config.USER_ID)
+            name = f"MsRewardsBot_{safe}"
+            self._handle = win32event.CreateMutex(None, True, name)
+            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                return False
+            self._held = True
+            return True
+        except Exception as exc:
+            log.warning("lock de instancia única falló (%s) — continuando sin lock", exc)
+            return True
 
     def release(self) -> None:
         if self._handle is not None:
