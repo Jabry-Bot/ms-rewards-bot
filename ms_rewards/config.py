@@ -57,11 +57,10 @@ MOBILE_SEARCHES_ENABLED = os.getenv("MSR_MOBILE_SEARCHES", "1") == "1"
 # Idioma de las queries que generamos.
 LOCALE = os.getenv("MSR_LOCALE", "es-ES")
 
-# Posición/tamaño de arranque de la ventana del bot. Por defecto fuera de
-# pantalla para no molestar durante una partida (la página sigue "visible"
-# para Bing, así que se acreditan puntos — a diferencia de minimizar).
-# Pon MSR_WINDOW_POSITION="" para que Chrome use su posición normal.
-WINDOW_POSITION = os.getenv("MSR_WINDOW_POSITION", "-2400,-2400")
+# Posición/tamaño de arranque de la ventana del bot. La ventana se abre
+# VISIBLE en 0,0 (esquina superior izquierda). Pon MSR_WINDOW_POSITION=""
+# para que Chrome use su posición por defecto.
+WINDOW_POSITION = os.getenv("MSR_WINDOW_POSITION", "0,0")
 WINDOW_SIZE = os.getenv("MSR_WINDOW_SIZE", "900,700")
 
 # Rangos de delays — todos en segundos.
