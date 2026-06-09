@@ -79,7 +79,46 @@ def _wipe_profile(retries: int = 6) -> bool:
     return not p.exists()
 
 
-async def _fresh_login(email: str, password: str) -> bool:
+def reset_session() -> bool:
+    """
+    Deja el perfil del bot como recién instalado: cierra el Chrome del bot,
+    espera a que libere el perfil, lo borra, y borra credenciales + state.
+    Devuelve True si todo quedó limpio. Lo comparten switch_account y setup
+    para que ambos hagan EXACTAMENTE el mismo reset antes del login.
+    """
+    print("[*] Cerrando Chrome del bot y esperando a que libere el perfil...")
+    if not _kill_and_wait():
+        print(
+            "  AVISO: aún hay Chrome del bot abierto. Cierra cualquier ventana "
+            "del bot manualmente y reintenta."
+        )
+        return False
+    print("  OK, sin procesos del bot.")
+
+    print("[*] Borrando la sesión anterior (perfil de Chrome)...")
+    if not _wipe_profile():
+        print(
+            "  ERROR: no se pudo borrar el perfil por completo. Puede haber un "
+            "archivo bloqueado. Cierra TODO Chrome y reintenta."
+        )
+        return False
+    print("  OK, perfil eliminado.")
+
+    print("[*] Borrando credenciales y estado anteriores...")
+    try:
+        credentials.delete()
+    except Exception:
+        pass
+    try:
+        if config.LAST_RUN_PATH.exists():
+            config.LAST_RUN_PATH.unlink()
+    except Exception:
+        pass
+    print("  OK.")
+    return True
+
+
+async def fresh_login(email: str, password: str) -> bool:
     """Lanza el contexto y fuerza el login (sin atajo de sesión activa)."""
     async with launch() as ctx:
         # Verificación defensiva: tras el wipe NO debería haber sesión. Si la
@@ -110,39 +149,9 @@ def main() -> int:
     print("=" * 60)
     print(f"\n Perfil del bot: {config.USER_DATA_DIR}\n")
 
-    # 1) Cerrar Chrome del bot y esperar
-    print("[1/4] Cerrando Chrome del bot y esperando a que libere el perfil...")
-    if not _kill_and_wait():
-        print(
-            "  AVISO: aún hay Chrome del bot abierto. Cierra cualquier ventana "
-            "del bot manualmente y reintenta."
-        )
+    # 1-3) Reset robusto del perfil (kill + wait + wipe + borrar creds/state)
+    if not reset_session():
         return 1
-    print("  OK, sin procesos del bot.")
-
-    # 2) Borrar perfil (sesión vieja)
-    print("[2/4] Borrando la sesión anterior (perfil de Chrome)...")
-    if _wipe_profile():
-        print("  OK, perfil eliminado.")
-    else:
-        print(
-            "  ERROR: no se pudo borrar el perfil por completo. Puede haber un "
-            "archivo bloqueado. Cierra TODO Chrome y reintenta."
-        )
-        return 1
-
-    # 3) Borrar credenciales + state
-    print("[3/4] Borrando credenciales y estado anteriores...")
-    try:
-        credentials.delete()
-    except Exception:
-        pass
-    try:
-        if config.LAST_RUN_PATH.exists():
-            config.LAST_RUN_PATH.unlink()
-    except Exception:
-        pass
-    print("  OK.")
 
     # 4) Credenciales nuevas + login forzado
     print("[4/4] Cuenta nueva:")
@@ -160,7 +169,7 @@ def main() -> int:
         print("  Credenciales cifradas y guardadas.")
 
     try:
-        ok = asyncio.run(_fresh_login(email, password))
+        ok = asyncio.run(fresh_login(email, password))
     except Exception as exc:
         log.exception("login falló: %s", exc)
         ok = False

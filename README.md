@@ -63,7 +63,9 @@ cd ms_rewards
 switch_account.bat
 ```
 
-Desconecta la cuenta actual (cierra el Chrome del bot, borra la sesión guardada y las credenciales cifradas) y lanza el login para una cuenta nueva. Pide confirmación antes de borrar nada. Re-ejecutar `setup.bat` **no** cambia la cuenta por sí solo, porque detecta la sesión vieja como activa — usa este script.
+Desconecta la cuenta actual (cierra el Chrome del bot, borra la sesión guardada y las credenciales cifradas) y lanza el login para una cuenta nueva. Pide confirmación antes de borrar nada.
+
+`setup.bat` hace ahora exactamente el mismo reset robusto antes del login (cierra el Chrome del bot, espera, borra el perfil viejo + credenciales + estado, y **fuerza** el login con la cuenta que indiques), así que re-ejecutarlo **sí** sirve para cambiar de cuenta. La diferencia es que `setup.bat` además instala dependencias y registra la Scheduled Task; `switch_account.bat` es el atajo cuando solo quieres cambiar de cuenta.
 
 ## Desinstalar
 

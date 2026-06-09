@@ -16,8 +16,7 @@ import sys
 
 import config
 import credentials
-from launcher import launch
-from login import is_session_alive, perform_login
+import switch_account as switch
 
 log = logging.getLogger("setup")
 
@@ -47,16 +46,6 @@ def _ask_yes_no(prompt: str, default: bool = True) -> bool:
     return val in ("s", "si", "sí", "y", "yes")
 
 
-async def _login_flow(email: str, password: str) -> bool:
-    print("\n>> Abriendo Chrome para hacer login (puede pedir 2FA la primera vez)...")
-    async with launch() as ctx:
-        if await is_session_alive(ctx):
-            print(">> Ya hay sesión activa en este perfil. Login no necesario.")
-            return True
-        ok = await perform_login(ctx, email, password, interactive=True)
-        return ok
-
-
 def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -83,38 +72,39 @@ def main() -> int:
 
     print(f"\n>> Perfil de Chrome: {config.USER_DATA_DIR}\n")
 
-    # 2) Credenciales
+    # 2) Reset robusto + credenciales (mismo flujo que switch_account.bat):
+    #    cierra el Chrome del bot, espera, borra el perfil viejo y las
+    #    credenciales/estado, y luego pide la cuenta y FUERZA el login. Así
+    #    re-ejecutar setup.bat SÍ entra con la cuenta que indiques (antes el
+    #    atajo "ya hay sesión activa" lo impedía si quedaba una sesión vieja).
     if not credentials.is_supported():
         print(
             "ADVERTENCIA: pywin32 no disponible — las credenciales no se "
             "guardarán cifradas. Tendrás que hacer login manualmente cada vez.\n"
         )
-    existing = credentials.load() if credentials.is_supported() else None
-    if existing:
-        print(f">> Ya hay credenciales guardadas para {existing[0]}.")
-        if _ask_yes_no("¿Quieres sobrescribirlas?", default=False):
-            existing = None
 
-    if existing is None:
-        email = _ask("Email de la cuenta Microsoft")
-        if not email:
-            print("ERROR: email vacío, abortando.")
-            return 1
-        password = getpass.getpass("Contraseña (no se mostrará): ")
-        if not password:
-            print("ERROR: contraseña vacía, abortando.")
-            return 1
-        if credentials.is_supported():
-            credentials.save(email, password)
-            print(">> Credenciales cifradas y guardadas.")
-        else:
-            print(">> Credenciales NO guardadas (DPAPI no disponible).")
+    if not switch.reset_session():
+        print(">> No se pudo limpiar la sesión anterior. Aborta y reintenta.")
+        return 1
+
+    email = _ask("Email de la cuenta Microsoft")
+    if not email:
+        print("ERROR: email vacío, abortando.")
+        return 1
+    password = getpass.getpass("Contraseña (no se mostrará): ")
+    if not password:
+        print("ERROR: contraseña vacía, abortando.")
+        return 1
+    if credentials.is_supported():
+        credentials.save(email, password)
+        print(">> Credenciales cifradas y guardadas.")
     else:
-        email, password = existing
+        print(">> Credenciales NO guardadas (DPAPI no disponible).")
 
-    # 3) Login asistido
+    # 3) Login forzado (sin atajo de sesión activa)
+    print("\n>> Abriendo Chrome para hacer login (puede pedir 2FA la primera vez)...")
     try:
-        ok = asyncio.run(_login_flow(email, password))
+        ok = asyncio.run(switch.fresh_login(email, password))
     except Exception as exc:
         log.exception("login falló: %s", exc)
         ok = False
