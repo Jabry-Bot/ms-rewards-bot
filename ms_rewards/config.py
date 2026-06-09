@@ -57,10 +57,16 @@ MOBILE_SEARCHES_ENABLED = os.getenv("MSR_MOBILE_SEARCHES", "1") == "1"
 # Idioma de las queries que generamos.
 LOCALE = os.getenv("MSR_LOCALE", "es-ES")
 
-# Posición/tamaño de arranque de la ventana del bot. La ventana se abre
-# VISIBLE en 0,0 (esquina superior izquierda). Pon MSR_WINDOW_POSITION=""
-# para que Chrome use su posición por defecto.
+# Posición/tamaño de arranque de la ventana del bot.
+#   - WINDOW_POSITION: posición cuando la corrida es INTERACTIVA (setup,
+#     switch_account, ejecutar.bat) — visible en 0,0 para poder ver/usar el CDP.
+#   - WINDOW_POSITION_HIDDEN: posición en la corrida AUTOMÁTICA programada —
+#     fuera de pantalla (-2400,-2400) para no molestar. Posicionar fuera de
+#     pantalla NO cambia visibilityState (sigue "visible"), así que Bing
+#     acredita igual — a diferencia de minimizar, que la pondría "hidden".
+# Pon MSR_WINDOW_POSITION="" para que Chrome use su posición por defecto.
 WINDOW_POSITION = os.getenv("MSR_WINDOW_POSITION", "0,0")
+WINDOW_POSITION_HIDDEN = os.getenv("MSR_WINDOW_POSITION_HIDDEN", "-2400,-2400")
 WINDOW_SIZE = os.getenv("MSR_WINDOW_SIZE", "900,700")
 
 # Rangos de delays — todos en segundos.

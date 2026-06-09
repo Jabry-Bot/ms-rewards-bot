@@ -33,7 +33,9 @@ Write-Host "  Script          : $RunScript"
 Write-Host "  WorkingDirectory: $RepoDir"
 Write-Host "  Daily trigger   : $DailyTime"
 
-$Action = New-ScheduledTaskAction -Execute $Executable -Argument "`"$RunScript`"" -WorkingDirectory $RepoDir
+# --scheduled marca la corrida como automática para que el bot abra Chrome
+# fuera de pantalla (las corridas manuales lo abren visible).
+$Action = New-ScheduledTaskAction -Execute $Executable -Argument "`"$RunScript`" --scheduled" -WorkingDirectory $RepoDir
 
 $CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $LogonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser

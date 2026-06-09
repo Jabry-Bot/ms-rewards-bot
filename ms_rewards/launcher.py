@@ -118,7 +118,7 @@ def _spawn_chrome() -> subprocess.Popen | None:
 
 
 @asynccontextmanager
-async def launch() -> AsyncIterator[BrowserContext]:
+async def launch(visible: bool = True) -> AsyncIterator[BrowserContext]:
     """
     Yields un BrowserContext sobre el perfil persistente del bot.
 
@@ -126,6 +126,12 @@ async def launch() -> AsyncIterator[BrowserContext]:
     lanzar el Chrome real instalado en el sistema (no el Chromium de
     Playwright). La sesión guardada con --setup se carga automáticamente
     porque apuntamos al mismo user_data_dir.
+
+    visible:
+        True  → ventana visible en pantalla (setup / switch_account / ejecutar
+                manual): se puede ver e interactuar con el CDP.
+        False → ventana fuera de pantalla (corrida automática programada): no
+                molesta, pero la página sigue "visible" para Bing y acredita.
 
     IMPORTANTE: Chrome no permite dos instancias sobre el mismo
     user_data_dir. Asegúrate de no tener un Chrome del bot abierto antes
@@ -151,9 +157,12 @@ async def launch() -> AsyncIterator[BrowserContext]:
         "--disable-blink-features=AutomationControlled",
     ]
 
-    # Posición/tamaño de la ventana del bot. Por defecto visible en 0,0.
-    if config.WINDOW_POSITION:
-        launch_args.append(f"--window-position={config.WINDOW_POSITION}")
+    # Posición de la ventana: visible (0,0) si es interactiva, fuera de
+    # pantalla si es la corrida automática programada.
+    window_position = config.WINDOW_POSITION if visible else config.WINDOW_POSITION_HIDDEN
+    log.info("ventana: %s", "visible" if visible else "oculta (fuera de pantalla)")
+    if window_position:
+        launch_args.append(f"--window-position={window_position}")
     if config.WINDOW_SIZE:
         launch_args.append(f"--window-size={config.WINDOW_SIZE}")
 

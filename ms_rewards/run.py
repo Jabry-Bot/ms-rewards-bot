@@ -139,13 +139,31 @@ async def _ensure_session(context) -> bool:
     return ok
 
 
-async def _run(do_daily: bool, do_searches: bool) -> tuple[int, int, int, dict]:
+def _is_automatic_run(scheduled_flag: bool) -> bool:
+    """
+    True si la corrida es la AUTOMÁTICA programada (Chrome debe ir oculto).
+
+    Se considera automática si:
+      - se pasó --scheduled (lo añade la Scheduled Task en instalaciones nuevas), o
+      - el proceso corre bajo pythonw.exe (la Scheduled Task usa pythonw para no
+        abrir consola) — esto cubre las tareas YA instaladas sin re-registrar.
+
+    Las corridas manuales (setup.bat, switch_account.bat, ejecutar.bat) usan
+    python.exe con consola, así que salen visibles.
+    """
+    if scheduled_flag:
+        return True
+    exe = os.path.basename(sys.executable).lower()
+    return exe.startswith("pythonw")
+
+
+async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple[int, int, int, dict]:
     log = logging.getLogger("run")
     searches_done = 0
     mobile_searches_done = 0
     daily_done = 0
     info: dict = {"level": None, "points_before": None, "points_after": None}
-    async with launch() as context:
+    async with launch(visible=visible) as context:
         # Pequeña pausa inicial humanizada
         await sleep_jitter(3.0, 7.0)
 
@@ -300,6 +318,8 @@ def main() -> int:
                         help="ignora el check de idempotencia diaria")
     parser.add_argument("--no-update", action="store_true",
                         help="salta el auto-update (git pull)")
+    parser.add_argument("--scheduled", action="store_true",
+                        help="marca la corrida como automática (oculta la ventana de Chrome)")
     args = parser.parse_args()
 
     _setup_logging()
@@ -347,9 +367,12 @@ def _main_locked(args, log) -> int:
     do_daily = args.daily or (not args.daily and not args.searches)
     do_searches = args.searches or (not args.daily and not args.searches)
 
+    # Ventana visible salvo en la corrida automática programada.
+    visible = not _is_automatic_run(args.scheduled)
+
     try:
         searches_done, mobile_searches_done, daily_done, info = asyncio.run(
-            _run(do_daily=do_daily, do_searches=do_searches)
+            _run(do_daily=do_daily, do_searches=do_searches, visible=visible)
         )
     except KeyboardInterrupt:
         log.info("interrumpido por usuario")
