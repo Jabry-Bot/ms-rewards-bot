@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "dashboard": {
     "card_link": "mee-rewards-daily-set-item-component a, mee-rewards-more-activities-card-item a, mee-rewards-punch-card a, .rewards-card-container a[data-bi-id]",
     "card_container": "mee-rewards-daily-set-item-component, mee-rewards-more-activities-card-item, mee-rewards-punch-card, mee-card",
@@ -10,8 +10,8 @@
     "claim_button": "a.punchcard-claim, button.punchcard-claim, a[data-bi-id*='Claim'], a[data-bi-name*='claim'], .punchcard-actions a"
   },
   "claim": {
-    "anywhere": "a[data-bi-id*='Claim'], a[data-bi-name*='claim'], button[data-bi-id*='Claim'], button[data-bi-name*='claim'], a.streak-claim, button.streak-claim, .punchcard-claim, a[aria-label*='Reclamar'], a[aria-label*='Claim'], button[aria-label*='Reclamar'], button[aria-label*='Claim']",
-    "text_keywords_es": "reclamar,reclama,conseguir,canjear,obtener oferta",
+    "anywhere": "a[data-bi-id*='Claim'], a[data-bi-name*='claim'], button[data-bi-id*='Claim'], button[data-bi-name*='claim'], a.streak-claim, button.streak-claim, .punchcard-claim, a[aria-label*='Reclamar'], a[aria-label*='Claim'], button[aria-label*='Reclamar'], button[aria-label*='Claim'], a[aria-label*='Solicitar'], button[aria-label*='Solicitar']",
+    "text_keywords_es": "reclamar,reclama,solicitar,solicita,conseguir,canjear,obtener oferta",
     "text_keywords_en": "claim,get the offer,get offer,redeem"
   },
   "quiz": {

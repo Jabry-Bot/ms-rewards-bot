@@ -42,7 +42,8 @@ def _record_broken(key: str, page_url: str, html: str) -> None:
 async def _click_claim_buttons(page: Page) -> int:
     """
     Escanea la página actual buscando botones de "Reclamar" / "Claim" /
-    "Conseguir oferta" y los pulsa uno a uno. Devuelve cuántos pulsó.
+    "Solicitar" / "Conseguir oferta" y los pulsa uno a uno (las ofertas con
+    botón "Solicitar" acreditan puntos extra). Devuelve cuántos pulsó.
 
     Estrategia doble (robusta a cambios de clase CSS):
       1) selector CSS desde selectors.json (data-bi-name*='claim', etc.)
