@@ -30,6 +30,7 @@ VENV_PY = ROOT / "ms_rewards" / ".venv" / "Scripts" / "python.exe"
 ASSETS = ROOT / "assets"
 LOGO = ASSETS / "logo.png"
 ICON = ASSETS / "icon.ico"
+SPLASH = ASSETS / "splash.png"
 
 TARGETS = {
     "panel": {"name": "MsRewardsPanel", "entry": ROOT / "scripts" / "run_panel.py", "uac": False},
@@ -73,6 +74,28 @@ def make_icon() -> Path | None:
     return ICON
 
 
+def make_splash() -> None:
+    """Genera assets/splash.png (logo centrado sobre fondo oscuro) para el splash."""
+    src = LOGO if LOGO.exists() else (ICON if ICON.exists() else None)
+    if src is None:
+        return
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError:
+        print("[aviso] Pillow no disponible; sin splash.png.")
+        return
+    print(f"== Generando {SPLASH.name} desde {src.name} ==")
+    im = Image.open(src).convert("RGBA")
+    box = 132
+    scale = box / max(im.width, im.height)
+    im = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))),
+                   Image.LANCZOS)
+    canvas = Image.new("RGBA", (box, box), (14, 17, 22, 255))  # #0e1116
+    canvas.paste(im, ((box - im.width) // 2, (box - im.height) // 2), im)
+    ASSETS.mkdir(exist_ok=True)
+    canvas.convert("RGB").save(SPLASH)
+
+
 def build_one(key: str, icon: Path | None) -> None:
     t = TARGETS[key]
     print(f"\n== Construyendo {t['name']}.exe ==")
@@ -85,8 +108,9 @@ def build_one(key: str, icon: Path | None) -> None:
         cmd.append("--uac-admin")
     if icon:
         cmd += ["--icon", str(icon)]
-        # Empaquetar el .ico para que la ventana (iconbitmap) lo encuentre.
-        cmd += ["--add-data", f"{icon};assets"]
+    # Empaquetar la carpeta assets (icon.ico para iconbitmap + splash.png).
+    if ASSETS.exists():
+        cmd += ["--add-data", f"{ASSETS};assets"]
     cmd.append(str(t["entry"]))
     _run(cmd)
 
@@ -112,6 +136,7 @@ def main() -> int:
 
     ensure_deps()
     icon = make_icon()
+    make_splash()
     # Construir desde la raíz para que dist/ y build/ queden ahí.
     import os
     os.chdir(ROOT)

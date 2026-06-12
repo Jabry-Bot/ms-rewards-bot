@@ -21,6 +21,11 @@ try:
 except ImportError:
     import core
 
+try:
+    from common import splash
+except ImportError:
+    splash = None
+
 
 # --- Tema global ---------------------------------------------------------
 ctk.set_appearance_mode("dark")
@@ -159,6 +164,10 @@ class App(ctk.CTk):
         self.refresh_status()   # estado inicial al arrancar
         # Al cerrar la ventana, no dejar el subproceso (navegador/run.py) huérfano.
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Splash animado con el logo al abrir; al terminar reaparece la ventana.
+        if splash is not None:
+            splash.play(self, on_done=self._after_splash,
+                        title="ms_rewards", subtitle="Panel de control")
         # Al abrir, comprobar/aplicar actualizaciones una vez (no bloqueante).
         # Se programa con after() para que la ventana aparezca primero y el
         # usuario vea el log "Buscar actualizaciones" llenándose.
@@ -466,6 +475,15 @@ class App(ctk.CTk):
                 self._append_log("--- cancelando… ---\n")
             except Exception as exc:
                 self._append_log(f"[ERROR] al cancelar: {exc}\n")
+
+    def _after_splash(self):
+        """Reaparece la ventana principal cuando el splash termina."""
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
 
     def _on_close(self):
         """Cierra la ventana terminando antes cualquier subproceso vivo."""

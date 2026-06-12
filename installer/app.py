@@ -28,6 +28,11 @@ try:
 except ImportError:
     import bootstrap as boot
 
+try:
+    from common import splash
+except ImportError:
+    splash = None
+
 
 # Sin ventanas de consola para los subprocesos que capturamos.
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -82,6 +87,20 @@ class App(ctk.CTk):
         # Escaneo inicial y arranque del drenado de la cola.
         self.refresh_tools()
         self.after(100, self._drain_log)
+
+        # Splash animado con el logo al abrir.
+        if splash is not None:
+            splash.play(self, on_done=self._after_splash,
+                        title="ms_rewards", subtitle="Instalador")
+
+    def _after_splash(self) -> None:
+        """Reaparece la ventana principal cuando el splash termina."""
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
 
     # --- Construcción de la UI -------------------------------------------
     def _build_ui(self) -> None:
