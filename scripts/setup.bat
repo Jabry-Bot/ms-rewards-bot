@@ -1,10 +1,11 @@
 @echo off
-REM ms_rewards - instalador automatizado para Windows.
-REM Doble-click este archivo. No requiere consola abierta.
+REM ms_rewards - instalador por linea de comandos (FALLBACK de setup.exe).
+REM Lo normal es usar setup.exe. Esto queda como alternativa si el .exe lo
+REM bloquea el antivirus o se prefiere la consola. Vive en scripts/.
 
 setlocal ENABLEDELAYEDEXPANSION
-set "ROOT=%~dp0"
-set "REWARDS=%ROOT%ms_rewards"
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+set "REWARDS=%ROOT%\ms_rewards"
 
 echo ============================================================
 echo  Instalando ms_rewards
@@ -96,6 +97,7 @@ if errorlevel 1 (
 REM patchright necesita drivers a veces; los instalamos sin fallar si ya estan
 echo Instalando drivers de patchright...
 "%VENV_PY%" -m patchright install chrome >nul 2>&1
+"%VENV_PY%" -m patchright install msedge >nul 2>&1
 
 echo.
 

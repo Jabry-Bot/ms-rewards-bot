@@ -250,3 +250,57 @@ def test_git_pull_cmd(tmp_path):
     cmd = boot.git_pull_cmd(git, repo)
     for token in (str(git), "-C", str(repo), "pull"):
         assert token in cmd
+
+
+# --- Panel: nombre y URL del .exe ----------------------------------------
+def test_panel_exe_name():
+    assert boot.PANEL_EXE_NAME == "MsRewardsPanel.exe"
+
+
+def test_panel_exe_url():
+    assert boot.PANEL_EXE_URL.startswith("https://")
+    assert boot.PANEL_EXE_NAME in boot.PANEL_EXE_URL
+    assert "releases" in boot.PANEL_EXE_URL
+    assert "download" in boot.PANEL_EXE_URL
+
+
+def test_shortcut_name():
+    assert boot.SHORTCUT_NAME.endswith(".lnk")
+
+
+# --- desktop_dir / panel_exe_path / desktop_shortcut_path ----------------
+def test_desktop_dir():
+    d = boot.desktop_dir()
+    assert isinstance(d, Path)
+    assert d.name == "Desktop"
+
+
+def test_panel_exe_path(tmp_path):
+    assert boot.panel_exe_path(tmp_path) == tmp_path / boot.PANEL_EXE_NAME
+
+
+def test_desktop_shortcut_path():
+    p = boot.desktop_shortcut_path()
+    assert isinstance(p, Path)
+    assert p.name == boot.SHORTCUT_NAME
+    assert p.parent.name == "Desktop"
+
+
+# --- create_shortcut_cmd -------------------------------------------------
+def test_create_shortcut_cmd(tmp_path):
+    target = tmp_path / "MsRewardsPanel.exe"
+    shortcut = tmp_path / "ms_rewards Panel.lnk"
+    workdir = tmp_path / "install"
+    cmd = boot.create_shortcut_cmd(target, shortcut, workdir)
+    assert isinstance(cmd, list)
+    assert cmd[0] == "powershell"
+    assert "-Command" in cmd
+    script = cmd[-1]
+    for fragment in (
+        str(target),
+        str(shortcut),
+        str(workdir),
+        "WScript.Shell",
+        "CreateShortcut",
+    ):
+        assert fragment in script

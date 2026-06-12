@@ -6,15 +6,12 @@ Repo: https://github.com/Jabry-Bot/ms-rewards-bot
 
 ## Instalación (cualquier usuario, Windows 10/11)
 
-> **Un clic (recomendado):** descarga **solo** `setup.exe` desde [Releases](https://github.com/Jabry-Bot/ms-rewards-bot/releases) y ejecútalo. Es autocontenido (trae su propio Python) y se basta solo: instala Python, Git y Edge si faltan, **clona el repo** en una carpeta de instalación (así sigue recibiendo auto-updates por `git pull`), crea el `.venv`, instala dependencias, configura la cuenta y registra la Scheduled Task. No necesitas nada preinstalado ni clonar a mano. Para el día a día usa `MsRewardsPanel.exe` (incluido); para desinstalar, el botón **🧹 Desinstalar** del propio panel.
+**Todo por ventanas, cero shell. Solo dos archivos:**
 
-```cmd
-git clone https://github.com/Jabry-Bot/ms-rewards-bot.git
-cd ms-rewards-bot
-setup.bat
-```
+1. **`setup.exe`** — descárgalo **solo** desde [Releases](https://github.com/Jabry-Bot/ms-rewards-bot/releases) y ejecútalo. Es autocontenido (trae su propio Python) y se basta solo: instala Python, Git y Edge si faltan, **clona el repo** en una carpeta de instalación (así sigue recibiendo auto-updates por `git pull`), crea el `.venv`, instala dependencias, descarga el panel, **crea un acceso directo en el Escritorio**, configura la cuenta y registra la Scheduled Task. No necesitas nada preinstalado ni clonar a mano.
+2. **`MsRewardsPanel.exe`** — el día a día (lo abres desde el acceso directo del Escritorio): ejecutar, estado en vivo, cambiar cuenta, login, registrar/quitar tarea, logs y **🧹 Desinstalar**. **Al abrirlo busca y aplica actualizaciones** automáticamente.
 
-O descarga el ZIP desde GitHub y ejecuta `setup.bat`. Es **importante clonar con git** si quieres recibir actualizaciones automáticas — el bot hace `git pull` antes de cada ejecución cuando hay una versión nueva.
+> Para usuarios avanzados o si el antivirus bloquea el `.exe`, hay un instalador por consola en [`scripts/setup.bat`](scripts/setup.bat) (requiere clonar el repo con git primero).
 
 El instalador hace todo el trabajo:
 
@@ -45,30 +42,22 @@ Variables de entorno relevantes:
 - `MSR_OLLAMA_URL=http://localhost:11434`
 - `MSR_OLLAMA_MODEL=qwen2.5-coder:7b`
 
-## Panel de control (GUI) — v2.0
+## Panel de control (`MsRewardsPanel.exe`)
 
-Desde la v2.0 hay una interfaz gráfica moderna (customtkinter) que reemplaza los `.bat` del día a día. Un solo panel con:
+Interfaz gráfica moderna (customtkinter) que reemplaza por completo los `.bat` del día a día. Un solo panel con:
 
 - **Ejecutar ahora** / **Solo daily** / **Solo búsquedas** (forzado).
 - **Estado** en vivo: última corrida, puntos, nivel, búsquedas y estado de la Scheduled Task.
 - **Cambiar cuenta** (pide email/contraseña en un diálogo y hace el reset + login).
 - **Login manual** (abre el navegador para 2FA/captcha).
 - **Registrar / Quitar** la tarea programada.
+- **🧹 Desinstalar** (quita tarea + borra estado/credenciales/perfil/variables, con confirmación).
 - **Log en vivo** del proceso en marcha, con botón de cancelar.
+- **Auto-update al abrir:** comprueba y aplica `git pull` automáticamente cada vez que se inicia.
 
-Lanzarla sin empaquetar (usa el `.venv` del bot, instala customtkinter si falta):
+El `.exe` es solo el front-end: invoca `ms_rewards\.venv\Scripts\python.exe run.py` por debajo. Necesita `setup.exe` ejecutado antes (crea el `.venv`).
 
-```cmd
-panel.bat
-```
-
-Generar el ejecutable `.exe` (queda en `dist\MsRewardsPanel.exe`, debe vivir junto a `ms_rewards\`):
-
-```cmd
-build_exe.bat
-```
-
-El `.exe` es solo el front-end: sigue invocando `ms_rewards\.venv\Scripts\python.exe run.py` por debajo, igual que los `.bat`. El `setup.bat` inicial sigue siendo necesario (instala Python + venv + dependencias).
+> **Dev / maintainer:** para lanzar las GUIs sin empaquetar, `python scripts/run_panel.py`. Para reconstruir los `.exe`, [`scripts/build_panel_exe.bat`](scripts/build_panel_exe.bat) y [`scripts/build_setup_exe.bat`](scripts/build_setup_exe.bat). Ver [`scripts/README.md`](scripts/README.md).
 
 ## Uso manual
 
@@ -87,28 +76,24 @@ cd ms_rewards
 
 ## Cambiar de cuenta
 
-```cmd
-switch_account.bat
-```
-
-Desconecta la cuenta actual (cierra el Chrome del bot, borra la sesión guardada y las credenciales cifradas) y lanza el login para una cuenta nueva. Pide confirmación antes de borrar nada.
-
-`setup.bat` hace ahora exactamente el mismo reset robusto antes del login (cierra el Chrome del bot, espera, borra el perfil viejo + credenciales + estado, y **fuerza** el login con la cuenta que indiques), así que re-ejecutarlo **sí** sirve para cambiar de cuenta. La diferencia es que `setup.bat` además instala dependencias y registra la Scheduled Task; `switch_account.bat` es el atajo cuando solo quieres cambiar de cuenta.
+Botón **Cambiar cuenta** del panel: desconecta la cuenta actual (cierra el navegador del bot, borra la sesión y las credenciales cifradas) y lanza el login para una cuenta nueva. Pide confirmación antes de borrar nada.
 
 ## Desinstalar
 
-```
-powershell -ExecutionPolicy Bypass -File ms_rewards\scheduler\uninstall_task.ps1
-```
-
-Y borra el directorio. Las credenciales viven en `ms_rewards\state\credentials.bin`.
+Botón **🧹 Desinstalar** del panel: elige qué quitar (tarea programada, estado, credenciales, perfil del navegador, variables `MSR_*`) con confirmación. Para borrar TODO, elimina además la carpeta del bot a mano. (Fallback por consola: [`scripts/uninstall.bat`](scripts/uninstall.bat).)
 
 ## Estructura
 
 | Archivo                          | Función                                                         |
 |----------------------------------|-----------------------------------------------------------------|
-| `setup.bat`                      | Instalador end-to-end                                           |
+| `setup.exe`                      | Instalador de un clic (Python/Git/Edge + venv + clone + cuenta) |
+| `MsRewardsPanel.exe`             | Panel de control del día a día (GUI)                            |
+| `installer/`                     | Código del instalador (`bootstrap.py` lógica + `app.py` GUI)    |
+| `panel/`                         | Código del panel (`core.py` lógica + `app.py` GUI)             |
+| `scripts/`                       | Build de los `.exe` + fallbacks de consola (dev/maintainer)     |
+| `tests/`                         | Tests (pytest) de la lógica del panel y del instalador          |
 | `ms_rewards/run.py`              | Orquestador (idempotencia + update + daily + searches + heal)   |
+| `ms_rewards/uninstall.py`        | Desinstalador no interactivo (invocado desde el panel)          |
 | `ms_rewards/launcher.py`         | Lanza Chrome real vía patchright                                |
 | `ms_rewards/daily.py`            | Resuelve daily set / more activities / punch cards              |
 | `ms_rewards/searches.py`         | 30+ búsquedas humanizadas en Bing                               |
@@ -119,7 +104,7 @@ Y borra el directorio. Las credenciales viven en `ms_rewards\state\credentials.b
 | `ms_rewards/updater.py`          | git pull condicional por `VERSION`                              |
 | `ms_rewards/runstate.py`         | Estado diario (idempotencia)                                    |
 | `ms_rewards/credentials.py`      | Cifrado DPAPI de email/pass                                     |
-| `ms_rewards/setup_cli.py`        | CLI interactivo invocado desde `setup.bat`                      |
+| `ms_rewards/setup_cli.py`        | CLI interactivo de cuenta (invocado por `setup.exe`)            |
 | `ms_rewards/scheduler/`          | Scripts PowerShell para gestionar la tarea programada           |
 
 ## Volatilidad de selectores

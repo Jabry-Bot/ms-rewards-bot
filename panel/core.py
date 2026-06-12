@@ -91,6 +91,15 @@ def venv_ready() -> bool:
     return VENV_PY.exists()
 
 
+def build_update_command() -> list[str]:
+    """
+    Comando que comprueba/aplica el auto-update (git pull) y sale. Lo lanza el
+    panel al arrancar; reutiliza run.py --update-only, que degrada con gracia si
+    no hay red, no es un repo git o no hay versión nueva.
+    """
+    return [str(VENV_PY), str(RUN_PY), "--update-only"]
+
+
 def build_run_command(action_id: str) -> list[str]:
     """
     Línea de comando para una acción de run.py.

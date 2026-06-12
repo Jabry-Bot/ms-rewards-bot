@@ -42,6 +42,57 @@ INSTALL_TASK_PS1 = REWARDS_DIR / "scheduler" / "install_task.ps1"
 # único archivo basta y además queda como repo git con auto-update por git pull.
 REPO_URL = "https://github.com/Jabry-Bot/ms-rewards-bot.git"
 
+# Panel de control: nombre del .exe y URL de descarga (último release). En modo
+# clone el repo no trae el .exe (es gitignored, se distribuye por Releases), así
+# que el instalador lo descarga a la carpeta de instalación.
+PANEL_EXE_NAME = "MsRewardsPanel.exe"
+PANEL_EXE_URL = (
+    "https://github.com/Jabry-Bot/ms-rewards-bot/releases/latest/download/"
+    + PANEL_EXE_NAME
+)
+# Nombre del acceso directo que se crea en el Escritorio (para que el usuario
+# encuentre el panel sin rebuscar en la carpeta de instalación).
+SHORTCUT_NAME = "ms_rewards Panel.lnk"
+
+
+def desktop_dir() -> Path:
+    """Carpeta del Escritorio del usuario."""
+    return Path.home() / "Desktop"
+
+
+def panel_exe_path(base: str | os.PathLike) -> Path:
+    """Ruta donde debe vivir el panel dentro de la carpeta de instalación."""
+    return Path(base) / PANEL_EXE_NAME
+
+
+def desktop_shortcut_path() -> Path:
+    """Ruta del acceso directo del panel en el Escritorio."""
+    return desktop_dir() / SHORTCUT_NAME
+
+
+def create_shortcut_cmd(
+    target: str | os.PathLike,
+    shortcut: str | os.PathLike,
+    workdir: str | os.PathLike,
+) -> list[str]:
+    """
+    Comando PowerShell que crea un acceso directo (.lnk) vía WScript.Shell.
+    Sin dependencias extra: usa el COM nativo de Windows.
+    """
+    # PowerShell escapa la comilla simple duplicándola dentro de '...'; así
+    # rutas con apóstrofo (p.ej. C:\Users\O'Brien\...) no rompen el script.
+    def _q(p: str | os.PathLike) -> str:
+        return str(p).replace("'", "''")
+
+    ps = (
+        "$w = New-Object -ComObject WScript.Shell; "
+        f"$s = $w.CreateShortcut('{_q(shortcut)}'); "
+        f"$s.TargetPath = '{_q(target)}'; "
+        f"$s.WorkingDirectory = '{_q(workdir)}'; "
+        "$s.Save()"
+    )
+    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
+
 
 @dataclass(frozen=True)
 class InstallPaths:

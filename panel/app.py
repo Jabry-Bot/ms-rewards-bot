@@ -153,6 +153,10 @@ class App(ctk.CTk):
         self.refresh_status()   # estado inicial al arrancar
         # Al cerrar la ventana, no dejar el subproceso (navegador/run.py) huérfano.
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Al abrir, comprobar/aplicar actualizaciones una vez (no bloqueante).
+        # Se programa con after() para que la ventana aparezca primero y el
+        # usuario vea el log "Buscar actualizaciones" llenándose.
+        self.after(400, self._auto_update)
 
     # --- Construcción de la UI ------------------------------------------
     def _build_layout(self):
@@ -198,7 +202,12 @@ class App(ctk.CTk):
 
         ctk.CTkButton(frame, text="🔄 Actualizar estado",
                       command=self.refresh_status).grid(
-            row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
+            row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+
+        # Nota: al abrir el panel se buscan actualizaciones automáticamente.
+        ctk.CTkLabel(frame, text="ℹ Al abrir se buscan actualizaciones",
+                     text_color="gray60", font=("", 11)).grid(
+            row=4, column=0, sticky="w", padx=16, pady=(0, 14))
 
     def _build_actions_panel(self):
         frame = ctk.CTkScrollableFrame(self, label_text="Acciones")
@@ -277,6 +286,17 @@ class App(ctk.CTk):
         label, color = core.status_style(last_run)
         self.badge.configure(text=f"  {label}  ", fg_color=color)
         self.status_label.configure(text=core.format_status(last_run, task))
+
+    def _auto_update(self):
+        """Al arrancar: comprueba/aplica actualizaciones (git pull) una vez.
+
+        Reutiliza _launch (hilo + cola), así que no congela la UI. Degrada con
+        gracia vía core.build_update_command (sin red / no es repo / sin versión
+        nueva no falla). Si ya hay un proceso en marcha, no hace nada.
+        """
+        if self.proc is None and self._venv_ok:
+            self._launch(core.build_update_command(),
+                         title="Buscar actualizaciones")
 
     def _query_task(self) -> dict:
         """Consulta el estado de la Scheduled Task (síncrono, salida pequeña)."""

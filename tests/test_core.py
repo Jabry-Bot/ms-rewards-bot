@@ -243,3 +243,11 @@ def test_build_uninstall_command_opcion_invalida():
 
     with pytest.raises(ValueError):
         core.build_uninstall_command(["bogus"])
+
+
+# --- build_update_command ------------------------------------------------
+def test_build_update_command():
+    cmd = core.build_update_command()
+    assert cmd == [str(core.VENV_PY), str(core.RUN_PY), "--update-only"]
+    assert cmd[0] == str(core.VENV_PY)
+    assert cmd[-1] == "--update-only"

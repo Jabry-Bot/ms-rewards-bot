@@ -378,9 +378,9 @@ class App(ctk.CTk):
                                                     f"{summary}\n\n{detail}"))
 
     def _run_install_steps(self) -> bool:
-        """Ejecuta los 7 pasos en orden. Devuelve False si un paso REQUIRED falla."""
-        # --- [1/7] Python ------------------------------------------------
-        self._log("\n[1/7] Python")
+        """Ejecuta los 8 pasos en orden. Devuelve False si un paso REQUIRED falla."""
+        # --- [1/8] Python ------------------------------------------------
+        self._log("\n[1/8] Python")
         sys_py = boot.detect_python_path()
         need_python = True
         if sys_py is not None:
@@ -403,8 +403,8 @@ class App(ctk.CTk):
                 return False
             self._log(f"   OK — Python detectado en {sys_py}")
 
-        # --- [2/7] Git ---------------------------------------------------
-        self._log("\n[2/7] Git")
+        # --- [2/8] Git ---------------------------------------------------
+        self._log("\n[2/8] Git")
         if boot.detect_git() is not None:
             self._log(f"   OK — Git en {boot.detect_git()}")
         else:
@@ -418,8 +418,8 @@ class App(ctk.CTk):
                 return False
             self._log(f"   OK — Git detectado en {boot.detect_git()}")
 
-        # --- [3/7] Edge (no required: no aborta) -------------------------
-        self._log("\n[3/7] Microsoft Edge")
+        # --- [3/8] Edge (no required: no aborta) -------------------------
+        self._log("\n[3/8] Microsoft Edge")
         if boot.detect_edge() is not None:
             self._log(f"   OK — Edge en {boot.detect_edge()}")
         else:
@@ -435,8 +435,8 @@ class App(ctk.CTk):
                 self._log("   [WARN] Edge no detectado; instálalo manualmente. "
                           "(Suele venir preinstalado en Windows 10/11.)")
 
-        # --- [4/7] Código del bot (clonar el repo si falta) --------------
-        self._log("\n[4/7] Código del bot")
+        # --- [4/8] Código del bot (clonar el repo si falta) --------------
+        self._log("\n[4/8] Código del bot")
         if self.paths.has_source:
             self._log(f"   OK — código ya presente en {self.paths.rewards_dir}; "
                       "omito clonado.")
@@ -488,8 +488,8 @@ class App(ctk.CTk):
                 return False
             self._log(f"   OK — repo clonado en {self.install_root}.")
 
-        # --- [5/7] venv --------------------------------------------------
-        self._log("\n[5/7] Entorno virtual (.venv)")
+        # --- [5/8] venv --------------------------------------------------
+        self._log("\n[5/8] Entorno virtual (.venv)")
         if self.paths.venv_ready:
             self._log("   OK — el venv ya existe; se omite.")
         else:
@@ -504,8 +504,8 @@ class App(ctk.CTk):
                 return False
             self._log("   OK — venv creado.")
 
-        # --- [6/7] pip ---------------------------------------------------
-        self._log("\n[6/7] Dependencias (pip)")
+        # --- [6/8] pip ---------------------------------------------------
+        self._log("\n[6/8] Dependencias (pip)")
         rc = self.run_and_capture(boot.pip_upgrade_cmd(self.paths.venv_py))
         if rc != 0:
             self._fail("Fallo al actualizar pip.", f"pip devolvió código {rc}.")
@@ -518,10 +518,10 @@ class App(ctk.CTk):
             return False
         self._log("   OK — dependencias instaladas.")
 
-        # --- [7/7] drivers patchright (no aborta) ------------------------
+        # --- [7/8] drivers patchright (no aborta) ------------------------
         # El navegador se elige más tarde en setup_cli.py, así que instalamos
         # los drivers de AMBOS (chrome y edge) para cubrir cualquier elección.
-        self._log("\n[7/7] Drivers de patchright (chrome + edge)")
+        self._log("\n[7/8] Drivers de patchright (chrome + edge)")
         for browser in ("chrome", "edge"):
             rc = self.run_and_capture(
                 boot.patchright_drivers_cmd(self.paths.venv_py, browser=browser))
@@ -530,6 +530,32 @@ class App(ctk.CTk):
             else:
                 self._log(f"   [WARN] No se pudieron instalar los drivers de "
                           f"{browser} (código {rc}); puedes reintentar más tarde.")
+
+        # --- [8/8] Panel de control y acceso directo (best-effort) -------
+        # Descarga el panel (.exe) si falta y crea un acceso directo en el
+        # Escritorio. Ningún fallo aquí debe abortar la instalación.
+        self._log("\n[8/8] Panel de control y acceso directo")
+        panel_exe = boot.panel_exe_path(self.paths.base)
+        if panel_exe.exists():
+            self._log(f"   panel ya presente, omito descarga ({panel_exe}).")
+        else:
+            self._log(f"   Descargando el panel desde {boot.PANEL_EXE_URL}…")
+            try:
+                urllib.request.urlretrieve(boot.PANEL_EXE_URL, str(panel_exe))
+                self._log(f"   OK — panel guardado en {panel_exe}.")
+            except Exception as exc:  # noqa: BLE001 — best-effort, no aborta
+                self._log(f"   [WARN] No se pudo descargar el panel ({exc}); "
+                          "puedes bajarlo del release manualmente.")
+
+        if panel_exe.exists():
+            shortcut = boot.desktop_shortcut_path()
+            rc = self.run_and_capture(
+                boot.create_shortcut_cmd(panel_exe, shortcut, self.paths.base))
+            if rc == 0:
+                self._log(f"   Acceso directo creado en el Escritorio: {shortcut}")
+            else:
+                self._log(f"   [WARN] No se pudo crear el acceso directo "
+                          f"(código {rc}); puedes crearlo manualmente.")
 
         return True
 

@@ -1,10 +1,10 @@
 @echo off
-REM ms_rewards - desinstalador.
-REM Doble-click este archivo. Te pregunta antes de borrar cosas que dolerian.
+REM ms_rewards - desinstalador por linea de comandos (FALLBACK).
+REM Lo normal es usar el boton "Desinstalar" del panel. Vive en scripts/.
 
 setlocal ENABLEDELAYEDEXPANSION
-set "ROOT=%~dp0"
-set "REWARDS=%ROOT%ms_rewards"
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+set "REWARDS=%ROOT%\ms_rewards"
 
 echo ============================================================
 echo  Desinstalando ms_rewards
@@ -63,24 +63,12 @@ REM --- 5) Variables de entorno persistentes MSR_* (con confirmacion) ---
 echo [5/5] Variables de entorno del usuario ^(MSR_USER_ID, MSR_MAINTAINER, MSR_OLLAMA_*^)
 set /p ANS=  Quitar variables de entorno MSR_* persistentes? [s/N]:
 if /I "!ANS!"=="s" (
-    for %%V in (MSR_USER_ID MSR_MAINTAINER MSR_OLLAMA_URL MSR_OLLAMA_MODEL MSR_USER_DATA_DIR MSR_SEARCH_COUNT MSR_SEARCH_COUNT_L1 MSR_SEARCH_COUNT_L2 MSR_LOCALE MSR_CDP_PORT MSR_CHROME_PATH) do (
+    for %%V in (MSR_USER_ID MSR_BROWSER MSR_MAINTAINER MSR_OLLAMA_URL MSR_OLLAMA_MODEL MSR_USER_DATA_DIR MSR_SEARCH_COUNT MSR_SEARCH_COUNT_L1 MSR_SEARCH_COUNT_L2 MSR_LOCALE MSR_CDP_PORT MSR_CHROME_PATH) do (
         reg delete "HKCU\Environment" /F /V %%V >nul 2>&1
     )
     echo   variables MSR_* eliminadas ^(afecta a nuevas sesiones de CMD^).
 ) else (
     echo   conservadas.
-)
-echo.
-
-REM --- 6) venv y logs (con confirmacion conjunta) ---
-echo [Extra] Entorno virtual ^(.venv^) y logs ^(logs\^)
-set /p ANS=  Borrar .venv y logs/ tambien? [s/N]:
-if /I "!ANS!"=="s" (
-    if exist "%REWARDS%\.venv" rmdir /S /Q "%REWARDS%\.venv"
-    if exist "%REWARDS%\logs"  rmdir /S /Q "%REWARDS%\logs"
-    echo   .venv y logs eliminados.
-) else (
-    echo   conservados.
 )
 echo.
 

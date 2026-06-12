@@ -320,11 +320,27 @@ def main() -> int:
                         help="salta el auto-update (git pull)")
     parser.add_argument("--scheduled", action="store_true",
                         help="marca la corrida como automática (oculta la ventana de Chrome)")
+    parser.add_argument("--update-only", action="store_true",
+                        help="solo comprueba/aplica el auto-update (git pull) y sale")
     args = parser.parse_args()
 
     _setup_logging()
     log = logging.getLogger("run")
     log.info("user=%s perfil=%s", config.USER_ID, config.USER_DATA_DIR)
+
+    if args.update_only:
+        # Usado por el panel al abrirse: comprobar y aplicar actualizaciones
+        # sin ejecutar el bot. updater ya degrada con gracia si no hay red,
+        # no es un repo git, o no hay versión nueva.
+        try:
+            if updater.update_if_needed():
+                log.info("actualización aplicada — ahora en VERSION=%s",
+                         updater.current_version())
+            else:
+                log.info("sin actualizaciones (VERSION=%s)", updater.current_version())
+        except Exception as exc:
+            log.warning("auto-update falló: %s", exc)
+        return 0
 
     if args.kill:
         shutdown_chrome()
