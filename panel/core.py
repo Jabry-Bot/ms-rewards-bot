@@ -1,0 +1,243 @@
+"""
+Lógica pura del panel de control de ms_rewards.
+
+Este módulo NO importa ninguna librería de GUI ni el código del bot: solo
+resuelve rutas, construye las líneas de comando que la GUI lanzará como
+subprocesos, y formatea el estado leído de `state/last_run.json`. Así puede
+testearse sin display ni dependencias pesadas (patchright, customtkinter).
+
+La GUI (panel/app.py) y los tests (tests/test_core.py) consumen esta API.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+# --- Rutas ---------------------------------------------------------------
+# core.py vive en <repo>/panel/core.py → el repo es dos niveles arriba.
+# Dentro del .exe de PyInstaller (onefile), __file__ se desempaqueta en una
+# carpeta temporal (_MEIPASS), así que no sirve para localizar el repo: en ese
+# caso anclamos a la carpeta donde está el propio .exe (que debe vivir junto a
+# ms_rewards/). En desarrollo (no congelado) usamos la ruta del fuente.
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent.parent
+REWARDS_DIR = ROOT / "ms_rewards"
+VENV_PY = REWARDS_DIR / ".venv" / "Scripts" / "python.exe"
+RUN_PY = REWARDS_DIR / "run.py"
+SWITCH_PY = REWARDS_DIR / "switch_account.py"
+STATE_DIR = REWARDS_DIR / "state"
+LAST_RUN_PATH = STATE_DIR / "last_run.json"
+LOG_DIR = REWARDS_DIR / "logs"
+SCHEDULER_DIR = REWARDS_DIR / "scheduler"
+INSTALL_TASK_PS1 = SCHEDULER_DIR / "install_task.ps1"
+UNINSTALL_TASK_PS1 = SCHEDULER_DIR / "uninstall_task.ps1"
+
+TASK_NAME = "MsRewardsBot"
+
+
+# --- Acciones del bot ----------------------------------------------------
+# Cada acción mapea a una invocación de run.py. La GUI muestra `label` en el
+# botón y lanza `build_run_command(action_id)` como subproceso.
+@dataclass(frozen=True)
+class Action:
+    id: str
+    label: str
+    flags: tuple[str, ...]
+    description: str
+    # Si True, la GUI debería pedir confirmación antes de lanzar (acciones
+    # destructivas o que abren ventanas de navegador para login manual).
+    confirm: bool = False
+
+
+ACTIONS: dict[str, Action] = {
+    "run_all": Action(
+        "run_all", "▶  Ejecutar ahora",
+        ("--force",),
+        "Daily set + búsquedas desktop + móvil (forzado, ignora 'ya completado hoy').",
+    ),
+    "daily": Action(
+        "daily", "📋  Solo daily set",
+        ("--daily", "--force"),
+        "Resuelve únicamente el daily set / actividades.",
+    ),
+    "searches": Action(
+        "searches", "🔍  Solo búsquedas",
+        ("--searches", "--force"),
+        "Solo las búsquedas de Bing (desktop + móvil).",
+    ),
+    "login": Action(
+        "login", "🔐  Login manual",
+        ("--setup",),
+        "Abre el navegador para iniciar sesión a mano (2FA / captcha).",
+    ),
+    "kill": Action(
+        "kill", "⏹  Detener navegador",
+        ("--kill",),
+        "Mata cualquier navegador del bot que quede colgado.",
+        confirm=True,
+    ),
+}
+
+
+def venv_ready() -> bool:
+    """True si el entorno virtual del bot existe (setup.bat ya corrió)."""
+    return VENV_PY.exists()
+
+
+def build_run_command(action_id: str) -> list[str]:
+    """
+    Línea de comando para una acción de run.py.
+
+    Lanza con `--no-update` cuando es una acción interactiva del panel para no
+    bloquear el arranque con un git pull; el auto-update sigue activo en la
+    corrida automática de la Scheduled Task.
+    """
+    if action_id not in ACTIONS:
+        raise KeyError(f"acción desconocida: {action_id!r}")
+    action = ACTIONS[action_id]
+    return [str(VENV_PY), str(RUN_PY), *action.flags]
+
+
+def build_switch_command() -> list[str]:
+    """Línea de comando para el cambio de cuenta (switch_account.py)."""
+    return [str(VENV_PY), str(SWITCH_PY)]
+
+
+def build_task_command(install: bool) -> list[str]:
+    """PowerShell para registrar (install=True) o quitar la Scheduled Task."""
+    ps1 = INSTALL_TASK_PS1 if install else UNINSTALL_TASK_PS1
+    return [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", str(ps1),
+    ]
+
+
+def build_task_query_command() -> list[str]:
+    """
+    PowerShell que emite en JSON el estado de la Scheduled Task. La GUI parsea
+    la salida con `parse_task_query`. Devuelve `{}` si la tarea no existe.
+    """
+    script = (
+        f"$t = Get-ScheduledTask -TaskName '{TASK_NAME}' "
+        "-ErrorAction SilentlyContinue; "
+        "if ($null -eq $t) { '{}' } else { "
+        f"$i = Get-ScheduledTaskInfo -TaskName '{TASK_NAME}'; "
+        "[pscustomobject]@{ state = [string]$t.State; "
+        "last_run = [string]$i.LastRunTime; "
+        "last_result = $i.LastTaskResult; "
+        "next_run = [string]$i.NextRunTime } | ConvertTo-Json -Compress }"
+    )
+    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+
+
+def parse_task_query(stdout: str) -> dict[str, Any]:
+    """Parsea la salida de `build_task_query_command`. {} si no hay tarea."""
+    stdout = (stdout or "").strip()
+    if not stdout:
+        return {}
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_last_run() -> dict[str, Any]:
+    """Lee state/last_run.json. {} si no existe o está corrupto."""
+    if not LAST_RUN_PATH.exists():
+        return {}
+    try:
+        with LAST_RUN_PATH.open(encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+
+
+# Estado → (etiqueta legible, color hex para el badge de la GUI).
+_STATUS_STYLES: dict[str, tuple[str, str]] = {
+    "ok": ("Completado", "#2ecc71"),
+    "empty": ("Sin actividad", "#f39c12"),
+    "needs_relogin": ("Requiere login", "#e74c3c"),
+    "selectors_broken": ("Selectores rotos", "#e67e22"),
+    "error": ("Error", "#e74c3c"),
+}
+_UNKNOWN_STYLE = ("Desconocido", "#95a5a6")
+
+
+def status_style(last_run: dict[str, Any]) -> tuple[str, str]:
+    """(etiqueta, color) para el estado actual del bot."""
+    status = str(last_run.get("status", "")).lower()
+    return _STATUS_STYLES.get(status, _UNKNOWN_STYLE)
+
+
+def completed_today(last_run: dict[str, Any] | None = None) -> bool:
+    """True si el bot ya marcó hoy como completado."""
+    if last_run is None:
+        last_run = read_last_run()
+    return last_run.get("last_completed") == date.today().isoformat()
+
+
+def format_status(last_run: dict[str, Any], task: dict[str, Any] | None = None) -> str:
+    """
+    Resumen multilínea legible del estado del bot, para el panel lateral.
+
+    `last_run` es el dict de last_run.json; `task` el de `parse_task_query`.
+    """
+    lines: list[str] = []
+    label, _ = status_style(last_run)
+    lines.append(f"Estado: {label}")
+
+    if last_run:
+        if "last_completed" in last_run:
+            hoy = " (hoy)" if completed_today(last_run) else ""
+            lines.append(f"Último completado: {last_run['last_completed']}{hoy}")
+        if last_run.get("points_after") is not None:
+            pa = last_run.get("points_after")
+            pb = last_run.get("points_before")
+            if pb is not None:
+                lines.append(f"Puntos: {pb} → {pa}  ({pa - pb:+d})")
+            else:
+                lines.append(f"Puntos: {pa}")
+        if last_run.get("level") is not None:
+            lines.append(f"Nivel: {last_run['level']}")
+        partes = []
+        if last_run.get("searches_done") is not None:
+            partes.append(f"{last_run['searches_done']} desktop")
+        if last_run.get("mobile_searches_done") is not None:
+            partes.append(f"{last_run['mobile_searches_done']} móvil")
+        if partes:
+            lines.append("Búsquedas: " + " · ".join(partes))
+        if last_run.get("daily_done") is not None:
+            lines.append(f"Daily cards: {last_run['daily_done']}")
+        if last_run.get("updated_at"):
+            lines.append(f"Actualizado: {last_run['updated_at']}")
+    else:
+        lines.append("(aún no hay ninguna corrida registrada)")
+
+    lines.append("")
+    if task:
+        lines.append("Tarea programada: registrada")
+        if task.get("state"):
+            lines.append(f"  Estado: {task['state']}")
+        if task.get("next_run"):
+            lines.append(f"  Próxima: {task['next_run']}")
+        if task.get("last_run"):
+            lines.append(
+                f"  Última: {task['last_run']} (código {task.get('last_result', '?')})"
+            )
+    else:
+        lines.append("Tarea programada: NO registrada")
+
+    return "\n".join(lines)
+
+
+def today_log_path() -> Path:
+    """Ruta del log de hoy (puede no existir todavía)."""
+    return LOG_DIR / f"{date.today():%Y%m%d}.log"

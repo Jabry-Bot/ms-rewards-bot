@@ -43,6 +43,31 @@ Variables de entorno relevantes:
 - `MSR_OLLAMA_URL=http://localhost:11434`
 - `MSR_OLLAMA_MODEL=qwen2.5-coder:7b`
 
+## Panel de control (GUI) — v2.0
+
+Desde la v2.0 hay una interfaz gráfica moderna (customtkinter) que reemplaza los `.bat` del día a día. Un solo panel con:
+
+- **Ejecutar ahora** / **Solo daily** / **Solo búsquedas** (forzado).
+- **Estado** en vivo: última corrida, puntos, nivel, búsquedas y estado de la Scheduled Task.
+- **Cambiar cuenta** (pide email/contraseña en un diálogo y hace el reset + login).
+- **Login manual** (abre el navegador para 2FA/captcha).
+- **Registrar / Quitar** la tarea programada.
+- **Log en vivo** del proceso en marcha, con botón de cancelar.
+
+Lanzarla sin empaquetar (usa el `.venv` del bot, instala customtkinter si falta):
+
+```cmd
+panel.bat
+```
+
+Generar el ejecutable `.exe` (queda en `dist\MsRewardsPanel.exe`, debe vivir junto a `ms_rewards\`):
+
+```cmd
+build_exe.bat
+```
+
+El `.exe` es solo el front-end: sigue invocando `ms_rewards\.venv\Scripts\python.exe run.py` por debajo, igual que los `.bat`. El `setup.bat` inicial sigue siendo necesario (instala Python + venv + dependencias).
+
 ## Uso manual
 
 Tras el setup, puedes invocar el bot a mano:

@@ -1,0 +1,3 @@
+# Dependencias de runtime de la GUI.
+# pyinstaller NO va aqui: se instala aparte al construir el .exe (ver build_exe.bat).
+customtkinter>=5.2

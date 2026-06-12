@@ -13,3 +13,8 @@ ms_rewards/state/*
 
 # diagnostic / temp scripts
 _*.py
+
+# PyInstaller (build de la GUI)
+build/
+dist/
+*.spec
