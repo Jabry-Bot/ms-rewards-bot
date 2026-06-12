@@ -6,6 +6,8 @@ Repo: https://github.com/Jabry-Bot/ms-rewards-bot
 
 ## Instalación (cualquier usuario, Windows 10/11)
 
+> **Un clic (recomendado):** ahora existe un `setup.exe` autocontenido (trae su propio Python). Descárgalo y ejecútalo: instala Python, Git y Edge si faltan, crea el `.venv`, instala dependencias, configura la cuenta y registra la Scheduled Task. No necesitas nada preinstalado.
+
 ```cmd
 git clone https://github.com/Jabry-Bot/ms-rewards-bot.git
 cd ms-rewards-bot

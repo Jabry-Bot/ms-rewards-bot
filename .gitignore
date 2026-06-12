@@ -14,7 +14,9 @@ ms_rewards/state/*
 # diagnostic / temp scripts
 _*.py
 
-# PyInstaller (build de la GUI)
+# PyInstaller (build de la GUI / instalador)
 build/
 dist/
 *.spec
+# binarios empaquetados (se distribuyen vía GitHub Releases, no en git)
+*.exe
