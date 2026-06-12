@@ -80,6 +80,61 @@ class CredentialDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+class UninstallDialog(ctk.CTkToplevel):
+    """Diálogo modal con un checkbox por cada opción de desinstalación.
+
+    `self.result` queda como la lista de claves marcadas si el usuario confirma,
+    o None si cancela.
+    """
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Desinstalar")
+        self.geometry("460x360")
+        self.resizable(False, False)
+        self.result: list[str] | None = None
+
+        ctk.CTkLabel(self, text="¿Qué quieres eliminar?",
+                     font=("", 14, "bold")).pack(pady=(18, 4))
+        ctk.CTkLabel(
+            self,
+            text="⚠  Acción destructiva: lo seleccionado se borra de forma "
+                 "permanente.",
+            text_color="#e74c3c", wraplength=420, justify="left",
+        ).pack(padx=24, pady=(0, 12))
+
+        # Un checkbox por opción de core.UNINSTALL_OPTIONS.
+        self._vars: list[tuple[str, ctk.BooleanVar]] = []
+        for key, label, default in core.UNINSTALL_OPTIONS:
+            var = ctk.BooleanVar(value=default)
+            ctk.CTkCheckBox(self, text=label, variable=var).pack(
+                anchor="w", padx=24, pady=4)
+            self._vars.append((key, var))
+
+        botones = ctk.CTkFrame(self, fg_color="transparent")
+        botones.pack(pady=(16, 0))
+        ctk.CTkButton(botones, text="Cancelar", width=140,
+                      fg_color="gray30", command=self._cancel).pack(side="left", padx=6)
+        ctk.CTkButton(botones, text="Desinstalar", width=140,
+                      fg_color="#c0392b", hover_color="#a93226",
+                      command=self._accept).pack(side="left", padx=6)
+
+        # Modal: capturar foco y bloquear la ventana principal.
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+
+    def _accept(self):
+        self.result = [key for key, var in self._vars if var.get()]
+        self.grab_release()
+        self.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.grab_release()
+        self.destroy()
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -109,7 +164,7 @@ class App(ctk.CTk):
         if not self._venv_ok:
             warn = ctk.CTkLabel(
                 self,
-                text="⚠  Ejecuta setup.bat primero — falta el entorno virtual",
+                text="⚠  Ejecuta setup.exe primero — falta el entorno virtual",
                 fg_color="#8e2b2b", corner_radius=8,
                 text_color="white", font=("", 14, "bold"),
                 height=36,
@@ -173,6 +228,14 @@ class App(ctk.CTk):
 
         btn = ctk.CTkButton(frame, text="🗑 Quitar tarea", fg_color="gray30",
                             command=lambda: self._on_task(install=False))
+        btn.pack(fill="x", padx=8, pady=5)
+        self.action_buttons.append(btn)
+
+        # Desinstalar (destructivo): se añade a action_buttons para que se
+        # deshabilite sin venv y mientras corre otro proceso.
+        btn = ctk.CTkButton(frame, text="🧹 Desinstalar",
+                            fg_color="#c0392b", hover_color="#a93226",
+                            command=self._on_uninstall)
         btn.pack(fill="x", padx=8, pady=5)
         self.action_buttons.append(btn)
 
@@ -258,6 +321,27 @@ class App(ctk.CTk):
     def _on_task(self, install: bool):
         title = "Registrar tarea" if install else "Quitar tarea"
         self._launch(core.build_task_command(install), title=title)
+
+    def _on_uninstall(self):
+        dialog = UninstallDialog(self)
+        self.wait_window(dialog)
+        if dialog.result is None:
+            return
+        opciones = dialog.result
+        if not opciones:
+            messagebox.showinfo(
+                "Nada seleccionado",
+                "No marcaste ninguna opción, así que no se borrará nada.")
+            return
+        # Confirmación final listando exactamente lo que se va a borrar.
+        etiquetas = {key: label for key, label, _ in core.UNINSTALL_OPTIONS}
+        listado = "\n".join(f"  • {etiquetas.get(o, o)}" for o in opciones)
+        if not messagebox.askyesno(
+                "Confirmar desinstalación",
+                "Se va a eliminar de forma permanente:\n\n"
+                f"{listado}\n\n¿Continuar?"):
+            return
+        self._launch(core.build_uninstall_command(opciones), title="Desinstalar")
 
     def _open_logs(self):
         try:

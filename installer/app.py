@@ -17,8 +17,10 @@ import threading
 import tempfile
 import urllib.request
 
+from pathlib import Path
+
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 
 # Importamos el bootstrap con fallback: congelado puede no existir el paquete.
 try:
@@ -57,6 +59,17 @@ class App(ctk.CTk):
         # Flag para no lanzar dos secuencias a la vez.
         self._busy = False
 
+        # --- Carpeta de instalación ----------------------------------------
+        # In-repo: el dev/maintainer ejecuta dentro del repo (ms_rewards/ al
+        # lado). Trabajamos en el sitio, sin clonar. Si NO, modo clone: usamos
+        # una carpeta de instalación estable por-usuario y clonamos el repo ahí.
+        self._in_repo = boot.is_in_repo(boot.ROOT)
+        if self._in_repo:
+            self.install_root: Path = boot.ROOT
+        else:
+            self.install_root = boot.default_install_dir()
+        self.paths = boot.InstallPaths(self.install_root)
+
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -67,7 +80,7 @@ class App(ctk.CTk):
     # --- Construcción de la UI -------------------------------------------
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(4, weight=1)  # el log se estira
+        self.grid_rowconfigure(5, weight=1)  # el log se estira
 
         # Cabecera.
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -87,9 +100,30 @@ class App(ctk.CTk):
             text_color="#9aa4b2",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
+        # Fila de carpeta de instalación (solo relevante en modo clone).
+        folder_box = ctk.CTkFrame(self)
+        folder_box.grid(row=1, column=0, sticky="ew", padx=20, pady=(2, 6))
+        folder_box.grid_columnconfigure(0, weight=1)
+
+        self.folder_label = ctk.CTkLabel(
+            folder_box, text="", anchor="w", justify="left",
+            font=ctk.CTkFont(size=12),
+        )
+        self.folder_label.grid(row=0, column=0, sticky="ew", padx=(10, 6), pady=8)
+
+        self.btn_change_dir = ctk.CTkButton(
+            folder_box, text="📁 Cambiar…", width=120,
+            command=self._choose_install_dir,
+        )
+        self.btn_change_dir.grid(row=0, column=1, sticky="e", padx=(0, 10), pady=8)
+        if self._in_repo:
+            # Dentro del repo no se elige carpeta: se trabaja en el sitio.
+            self.btn_change_dir.configure(state="disabled")
+        self._refresh_folder_label()
+
         # Checklist de herramientas.
         tools_box = ctk.CTkFrame(self)
-        tools_box.grid(row=1, column=0, sticky="ew", padx=20, pady=8)
+        tools_box.grid(row=2, column=0, sticky="ew", padx=20, pady=8)
         tools_box.grid_columnconfigure(0, weight=1)
 
         top = ctk.CTkFrame(tools_box, fg_color="transparent")
@@ -120,7 +154,7 @@ class App(ctk.CTk):
 
         # Botonera de acciones.
         actions = ctk.CTkFrame(self, fg_color="transparent")
-        actions.grid(row=2, column=0, sticky="ew", padx=20, pady=(2, 6))
+        actions.grid(row=3, column=0, sticky="ew", padx=20, pady=(2, 6))
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
 
@@ -143,11 +177,11 @@ class App(ctk.CTk):
         self.status_label = ctk.CTkLabel(
             self, text="Listo.", anchor="w", text_color="#9aa4b2",
         )
-        self.status_label.grid(row=3, column=0, sticky="ew", padx=22, pady=(0, 2))
+        self.status_label.grid(row=4, column=0, sticky="ew", padx=22, pady=(0, 2))
 
         # Panel de log (solo lectura, monoespaciado).
         log_box = ctk.CTkFrame(self)
-        log_box.grid(row=4, column=0, sticky="nsew", padx=20, pady=(2, 18))
+        log_box.grid(row=5, column=0, sticky="nsew", padx=20, pady=(2, 18))
         log_box.grid_columnconfigure(0, weight=1)
         log_box.grid_rowconfigure(0, weight=1)
 
@@ -183,6 +217,36 @@ class App(ctk.CTk):
         # Programado en el hilo de UI para no tocar Tk desde hilos de trabajo.
         self.after(0, lambda: self.status_label.configure(text=text))
 
+    # --- Carpeta de instalación ------------------------------------------
+    def _set_install_root(self, root: Path) -> None:
+        """Fija la carpeta de instalación y RECALCULA siempre self.paths."""
+        self.install_root = root
+        self.paths = boot.InstallPaths(self.install_root)
+
+    def _refresh_folder_label(self) -> None:
+        """Repinta la etiqueta de la carpeta de instalación."""
+        if self._in_repo:
+            text = (f"Carpeta de instalación: {self.install_root}  "
+                    "(ejecutando dentro del repo)")
+        else:
+            text = f"Carpeta de instalación: {self.install_root}"
+        self.folder_label.configure(text=text)
+
+    def _choose_install_dir(self) -> None:
+        """Abre un diálogo para elegir la carpeta de instalación (modo clone)."""
+        if self._in_repo or self._busy:
+            return
+        chosen = filedialog.askdirectory(initialdir=str(self.install_root.parent))
+        if not chosen:
+            return
+        chosen_path = Path(chosen)
+        # Anexar el nombre del proyecto si la carpeta elegida no lo es ya.
+        if chosen_path.name != "ms-rewards-bot":
+            chosen_path = chosen_path / "ms-rewards-bot"
+        self._set_install_root(chosen_path)
+        self._refresh_folder_label()
+        self.refresh_tools()
+
     # --- Checklist --------------------------------------------------------
     def refresh_tools(self) -> None:
         """Re-escanea las herramientas y repinta las filas."""
@@ -204,7 +268,7 @@ class App(ctk.CTk):
 
         # El paso final solo se habilita si el venv ya está listo.
         try:
-            ready = boot.venv_ready()
+            ready = self.paths.venv_ready
         except Exception:  # noqa: BLE001
             ready = False
         state = "normal" if (ready and not self._busy) else "disabled"
@@ -217,6 +281,9 @@ class App(ctk.CTk):
         # Programar en el hilo de UI.
         def apply() -> None:
             self.btn_install.configure(state=state)
+            # El botón de cambiar carpeta solo está activo en modo clone y ocioso.
+            if not self._in_repo:
+                self.btn_change_dir.configure(state=state)
             # configure depende también del venv; lo resuelve refresh_tools.
             if busy:
                 self.btn_configure.configure(state="disabled")
@@ -311,9 +378,9 @@ class App(ctk.CTk):
                                                     f"{summary}\n\n{detail}"))
 
     def _run_install_steps(self) -> bool:
-        """Ejecuta los 6 pasos en orden. Devuelve False si un paso REQUIRED falla."""
-        # --- [1/6] Python ------------------------------------------------
-        self._log("\n[1/6] Python")
+        """Ejecuta los 7 pasos en orden. Devuelve False si un paso REQUIRED falla."""
+        # --- [1/7] Python ------------------------------------------------
+        self._log("\n[1/7] Python")
         sys_py = boot.detect_python_path()
         need_python = True
         if sys_py is not None:
@@ -336,8 +403,8 @@ class App(ctk.CTk):
                 return False
             self._log(f"   OK — Python detectado en {sys_py}")
 
-        # --- [2/6] Git ---------------------------------------------------
-        self._log("\n[2/6] Git")
+        # --- [2/7] Git ---------------------------------------------------
+        self._log("\n[2/7] Git")
         if boot.detect_git() is not None:
             self._log(f"   OK — Git en {boot.detect_git()}")
         else:
@@ -351,8 +418,8 @@ class App(ctk.CTk):
                 return False
             self._log(f"   OK — Git detectado en {boot.detect_git()}")
 
-        # --- [3/6] Edge (no required: no aborta) -------------------------
-        self._log("\n[3/6] Microsoft Edge")
+        # --- [3/7] Edge (no required: no aborta) -------------------------
+        self._log("\n[3/7] Microsoft Edge")
         if boot.detect_edge() is not None:
             self._log(f"   OK — Edge en {boot.detect_edge()}")
         else:
@@ -368,40 +435,96 @@ class App(ctk.CTk):
                 self._log("   [WARN] Edge no detectado; instálalo manualmente. "
                           "(Suele venir preinstalado en Windows 10/11.)")
 
-        # --- [4/6] venv --------------------------------------------------
-        self._log("\n[4/6] Entorno virtual (.venv)")
-        if boot.venv_ready():
+        # --- [4/7] Código del bot (clonar el repo si falta) --------------
+        self._log("\n[4/7] Código del bot")
+        if self.paths.has_source:
+            self._log(f"   OK — código ya presente en {self.paths.rewards_dir}; "
+                      "omito clonado.")
+            # Si es un clon git previo, intentamos actualizarlo (sin abortar).
+            if not self._in_repo and (self.paths.base / ".git").exists():
+                git = boot.detect_git()
+                if git is not None:
+                    self._log("   Actualizando clon existente (git pull)…")
+                    rc = self.run_and_capture(
+                        boot.git_pull_cmd(git, self.paths.base))
+                    if rc != 0:
+                        self._log(f"   [WARN] git pull devolvió código {rc}; "
+                                  "continúo con el código actual.")
+        else:
+            git = boot.detect_git()
+            if git is None:
+                self._fail("No se puede clonar el bot sin Git.",
+                           "Git no está disponible; instálalo y reintenta.")
+                return False
+            # git clone exige un destino inexistente o vacío. Si ya existe con
+            # contenido (pero sin el código del bot), avisamos claramente y
+            # apuntamos al botón "Cambiar…" en vez de fallar con un error críptico.
+            try:
+                if self.install_root.exists() and any(self.install_root.iterdir()):
+                    self._fail(
+                        "La carpeta de instalación no está vacía.",
+                        f"{self.install_root} ya tiene contenido que no es el bot. "
+                        "Usa «📁 Cambiar…» para elegir una carpeta vacía o nueva.")
+                    return False
+            except OSError:
+                pass
+            try:
+                self.install_root.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:  # noqa: BLE001
+                self._fail("No se pudo preparar la carpeta de instalación.",
+                           str(exc))
+                return False
+            self._log(f"   Clonando el repo en {self.install_root}…")
+            rc = self.run_and_capture(
+                boot.git_clone_cmd(git, self.install_root))
+            if rc != 0:
+                self._fail("No se pudo clonar el repositorio del bot.",
+                           f"git clone devolvió código {rc}. La carpeta destino "
+                           "debe estar vacía o no existir.")
+                return False
+            if not self.paths.has_source:
+                self._fail("Clonado completado pero no se encontró el código.",
+                           f"No existe {self.paths.rewards_dir} tras clonar.")
+                return False
+            self._log(f"   OK — repo clonado en {self.install_root}.")
+
+        # --- [5/7] venv --------------------------------------------------
+        self._log("\n[5/7] Entorno virtual (.venv)")
+        if self.paths.venv_ready:
             self._log("   OK — el venv ya existe; se omite.")
         else:
             if sys_py is None:
                 self._fail("No hay Python del sistema para crear el venv.", "")
                 return False
-            rc = self.run_and_capture(boot.venv_create_cmd(sys_py))
-            if rc != 0 or not boot.venv_ready():
+            rc = self.run_and_capture(
+                boot.venv_create_cmd(sys_py, self.paths.venv_dir))
+            if rc != 0 or not self.paths.venv_ready:
                 self._fail("No se pudo crear el entorno virtual.",
                            f"venv devolvió código {rc}.")
                 return False
             self._log("   OK — venv creado.")
 
-        # --- [5/6] pip ---------------------------------------------------
-        self._log("\n[5/6] Dependencias (pip)")
-        rc = self.run_and_capture(boot.pip_upgrade_cmd())
+        # --- [6/7] pip ---------------------------------------------------
+        self._log("\n[6/7] Dependencias (pip)")
+        rc = self.run_and_capture(boot.pip_upgrade_cmd(self.paths.venv_py))
         if rc != 0:
             self._fail("Fallo al actualizar pip.", f"pip devolvió código {rc}.")
             return False
-        rc = self.run_and_capture(boot.pip_requirements_cmd())
+        rc = self.run_and_capture(
+            boot.pip_requirements_cmd(self.paths.venv_py, self.paths.requirements))
         if rc != 0:
             self._fail("Fallo al instalar las dependencias del bot.",
                        f"pip install -r devolvió código {rc}.")
             return False
         self._log("   OK — dependencias instaladas.")
 
-        # --- [6/6] drivers patchright (no aborta) ------------------------
+        # --- [7/7] drivers patchright (no aborta) ------------------------
         # El navegador se elige más tarde en setup_cli.py, así que instalamos
         # los drivers de AMBOS (chrome y edge) para cubrir cualquier elección.
-        self._log("\n[6/6] Drivers de patchright (chrome + edge)")
+        self._log("\n[7/7] Drivers de patchright (chrome + edge)")
         for browser in ("chrome", "edge"):
-            rc = self.run_and_capture(boot.patchright_drivers_cmd(browser=browser))
+            rc = self.run_and_capture(
+                boot.patchright_drivers_cmd(self.paths.venv_py, browser=browser))
             if rc == 0:
                 self._log(f"   OK — drivers de {browser} instalados.")
             else:
@@ -462,7 +585,7 @@ class App(ctk.CTk):
     def _start_configure(self) -> None:
         if self._busy:
             return
-        if not boot.venv_ready():
+        if not self.paths.venv_ready:
             messagebox.showwarning(
                 "ms_rewards",
                 "El entorno virtual aún no está listo. Pulsa «Instalar todo» primero.",
@@ -498,8 +621,8 @@ class App(ctk.CTk):
         self._log("   (rellena los datos en la consola nueva; espera a que termine)")
         try:
             proc = subprocess.Popen(
-                [str(boot.VENV_PY), str(boot.SETUP_CLI)],
-                cwd=str(boot.REWARDS_DIR),
+                [str(self.paths.venv_py), str(self.paths.setup_cli)],
+                cwd=str(self.paths.rewards_dir),
                 creationflags=CREATE_NEW_CONSOLE,
             )
             self.proc = proc
@@ -521,7 +644,7 @@ class App(ctk.CTk):
         self._log("\nRegistrando la tarea programada…")
         rc = self.run_and_capture([
             "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(boot.INSTALL_TASK_PS1),
+            "-File", str(self.paths.install_task_ps1),
         ])
         if rc != 0:
             self._fail("No se pudo registrar la tarea programada.",

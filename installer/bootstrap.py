@@ -37,6 +37,66 @@ REQUIREMENTS = REWARDS_DIR / "requirements.txt"
 SETUP_CLI = REWARDS_DIR / "setup_cli.py"
 INSTALL_TASK_PS1 = REWARDS_DIR / "scheduler" / "install_task.ps1"
 
+# Repositorio del bot. El instalador, cuando se distribuye como setup.exe
+# SUELTO (sin el código al lado), clona esto para auto-aprovisionarse — así un
+# único archivo basta y además queda como repo git con auto-update por git pull.
+REPO_URL = "https://github.com/Jabry-Bot/ms-rewards-bot.git"
+
+
+@dataclass(frozen=True)
+class InstallPaths:
+    """
+    Rutas del proyecto derivadas de una carpeta base. Permite que el instalador
+    opere tanto 'in-repo' (base = carpeta del .exe, cuando el código ya está al
+    lado) como en 'modo clone' (base = carpeta de instalación elegida, donde se
+    clona el repo). Toda la lógica de pasos usa esto en vez de las constantes
+    globales, que solo describen el caso in-repo por defecto.
+    """
+    base: Path
+
+    @property
+    def rewards_dir(self) -> Path:
+        return self.base / "ms_rewards"
+
+    @property
+    def venv_dir(self) -> Path:
+        return self.rewards_dir / ".venv"
+
+    @property
+    def venv_py(self) -> Path:
+        return self.venv_dir / "Scripts" / "python.exe"
+
+    @property
+    def requirements(self) -> Path:
+        return self.rewards_dir / "requirements.txt"
+
+    @property
+    def setup_cli(self) -> Path:
+        return self.rewards_dir / "setup_cli.py"
+
+    @property
+    def install_task_ps1(self) -> Path:
+        return self.rewards_dir / "scheduler" / "install_task.ps1"
+
+    @property
+    def has_source(self) -> bool:
+        """True si el código del bot ya está presente en esta base."""
+        return self.rewards_dir.exists()
+
+    @property
+    def venv_ready(self) -> bool:
+        return self.venv_py.exists()
+
+
+def is_in_repo(base: str | os.PathLike = ROOT) -> bool:
+    """True si el código del bot ya vive junto a `base` (no hay que clonar)."""
+    return (Path(base) / "ms_rewards").exists()
+
+
+def default_install_dir() -> Path:
+    """Carpeta de instalación por defecto en modo clone (estable por-usuario)."""
+    return _local_app_data() / "ms-rewards-bot"
+
 # Python mínimo soportado y versión que instalamos si falta.
 MIN_PYTHON = (3, 10)
 PYTHON_VERSION = "3.12.7"
@@ -161,6 +221,18 @@ def python_direct_install_cmd(installer_path: str | os.PathLike) -> list[str]:
 def git_direct_install_cmd(installer_path: str | os.PathLike) -> list[str]:
     """Instalador de Git for Windows en modo silencioso."""
     return [str(installer_path), "/VERYSILENT", "/NORESTART", "/SP-"]
+
+
+def git_clone_cmd(
+    git_exe: str | os.PathLike, dest: str | os.PathLike, url: str = REPO_URL
+) -> list[str]:
+    """Clona el repo del bot en `dest` (shallow, solo lo necesario)."""
+    return [str(git_exe), "clone", "--depth", "1", url, str(dest)]
+
+
+def git_pull_cmd(git_exe: str | os.PathLike, repo_dir: str | os.PathLike) -> list[str]:
+    """Actualiza un clon existente (fast-forward only)."""
+    return [str(git_exe), "-C", str(repo_dir), "pull", "--ff-only"]
 
 
 def venv_create_cmd(system_python: str | os.PathLike, venv_dir: str | os.PathLike = VENV_DIR) -> list[str]:

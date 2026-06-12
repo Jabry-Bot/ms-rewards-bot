@@ -200,3 +200,46 @@ def test_today_log_path():
     p = core.today_log_path()
     assert p.name == f"{date.today():%Y%m%d}.log"
     assert p.parent == core.LOG_DIR
+
+
+# --- UNINSTALL_OPTIONS ---------------------------------------------------
+def test_uninstall_options_estructura():
+    assert isinstance(core.UNINSTALL_OPTIONS, list)
+    keys = set()
+    for item in core.UNINSTALL_OPTIONS:
+        assert isinstance(item, tuple) and len(item) == 3
+        key, label, default = item
+        assert isinstance(key, str) and key
+        assert isinstance(label, str) and label
+        assert isinstance(default, bool)
+        keys.add(key)
+    assert {"task", "state", "credentials", "profile", "env"} <= keys
+
+
+# --- UNINSTALL_PY --------------------------------------------------------
+def test_uninstall_py_ruta():
+    assert isinstance(core.UNINSTALL_PY, Path)
+    assert core.UNINSTALL_PY.name == "uninstall.py"
+    assert core.UNINSTALL_PY == core.REWARDS_DIR / "uninstall.py"
+
+
+# --- build_uninstall_command ---------------------------------------------
+def test_build_uninstall_command_vacio():
+    assert core.build_uninstall_command([]) == [
+        str(core.VENV_PY),
+        str(core.UNINSTALL_PY),
+    ]
+
+
+def test_build_uninstall_command_con_flags():
+    cmd = core.build_uninstall_command(["task", "state"])
+    assert cmd[0] == str(core.VENV_PY)
+    assert cmd[1] == str(core.UNINSTALL_PY)
+    assert cmd[-2:] == ["--task", "--state"]
+
+
+def test_build_uninstall_command_opcion_invalida():
+    import pytest
+
+    with pytest.raises(ValueError):
+        core.build_uninstall_command(["bogus"])

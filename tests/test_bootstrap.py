@@ -174,3 +174,79 @@ def test_scan_tools_installed_flags(tmp_path):
     assert statuses[0].tool is not_installed
     assert statuses[1].installed is True
     assert statuses[1].tool is installed
+
+
+# --- REPO_URL ------------------------------------------------------------
+def test_repo_url_forma():
+    assert isinstance(boot.REPO_URL, str)
+    assert boot.REPO_URL.startswith("https://")
+    assert boot.REPO_URL.endswith(".git")
+
+
+# --- InstallPaths --------------------------------------------------------
+def test_install_paths_rewards_dir(tmp_path):
+    p = boot.InstallPaths(tmp_path)
+    assert p.rewards_dir == tmp_path / "ms_rewards"
+
+
+def test_install_paths_venv_py(tmp_path):
+    p = boot.InstallPaths(tmp_path)
+    assert p.venv_py == tmp_path / "ms_rewards" / ".venv" / "Scripts" / "python.exe"
+
+
+def test_install_paths_derived_files(tmp_path):
+    p = boot.InstallPaths(tmp_path)
+    assert p.requirements == p.rewards_dir / "requirements.txt"
+    assert p.requirements.name == "requirements.txt"
+    assert p.setup_cli == p.rewards_dir / "setup_cli.py"
+    assert p.setup_cli.name == "setup_cli.py"
+    assert p.install_task_ps1 == p.rewards_dir / "scheduler" / "install_task.ps1"
+    assert p.install_task_ps1.name == "install_task.ps1"
+
+
+def test_install_paths_has_source(tmp_path):
+    p = boot.InstallPaths(tmp_path)
+    assert p.has_source is False
+    (tmp_path / "ms_rewards").mkdir()
+    assert p.has_source is True
+
+
+def test_install_paths_venv_ready(tmp_path):
+    p = boot.InstallPaths(tmp_path)
+    assert p.venv_ready is False
+    p.venv_py.parent.mkdir(parents=True)
+    p.venv_py.touch()
+    assert p.venv_ready is True
+
+
+# --- is_in_repo ----------------------------------------------------------
+def test_is_in_repo(tmp_path):
+    assert boot.is_in_repo(tmp_path) is False
+    (tmp_path / "ms_rewards").mkdir()
+    assert boot.is_in_repo(tmp_path) is True
+
+
+# --- default_install_dir -------------------------------------------------
+def test_default_install_dir():
+    d = boot.default_install_dir()
+    assert isinstance(d, Path)
+    assert d.name == "ms-rewards-bot"
+
+
+# --- git_clone_cmd / git_pull_cmd ----------------------------------------
+def test_git_clone_cmd(tmp_path):
+    git = tmp_path / "git.exe"
+    dest = tmp_path / "dest"
+    cmd = boot.git_clone_cmd(git, dest)
+    assert cmd == [str(git), "clone", "--depth", "1", boot.REPO_URL, str(dest)]
+    assert "clone" in cmd
+    assert boot.REPO_URL in cmd
+    assert str(dest) in cmd
+
+
+def test_git_pull_cmd(tmp_path):
+    git = tmp_path / "git.exe"
+    repo = tmp_path / "repo"
+    cmd = boot.git_pull_cmd(git, repo)
+    for token in (str(git), "-C", str(repo), "pull"):
+        assert token in cmd

@@ -31,6 +31,7 @@ REWARDS_DIR = ROOT / "ms_rewards"
 VENV_PY = REWARDS_DIR / ".venv" / "Scripts" / "python.exe"
 RUN_PY = REWARDS_DIR / "run.py"
 SWITCH_PY = REWARDS_DIR / "switch_account.py"
+UNINSTALL_PY = REWARDS_DIR / "uninstall.py"
 STATE_DIR = REWARDS_DIR / "state"
 LAST_RUN_PATH = STATE_DIR / "last_run.json"
 LOG_DIR = REWARDS_DIR / "logs"
@@ -107,6 +108,31 @@ def build_run_command(action_id: str) -> list[str]:
 def build_switch_command() -> list[str]:
     """Línea de comando para el cambio de cuenta (switch_account.py)."""
     return [str(VENV_PY), str(SWITCH_PY)]
+
+
+# Opciones de desinstalación: (clave de flag, etiqueta para la GUI, marcado por
+# defecto). Cada una mapea a un flag --<clave> de ms_rewards/uninstall.py.
+UNINSTALL_OPTIONS: list[tuple[str, str, bool]] = [
+    ("task", "Quitar la tarea programada (deja de ejecutarse solo)", True),
+    ("state", "Borrar el estado de ejecución (last_run.json)", True),
+    ("credentials", "Borrar las credenciales cifradas", False),
+    ("profile", "Borrar el perfil del navegador (pierdes la sesión iniciada)", False),
+    ("env", "Quitar las variables de entorno MSR_*", False),
+]
+
+
+def build_uninstall_command(options: list[str]) -> list[str]:
+    """
+    Línea de comando para desinstalar (uninstall.py, no interactivo).
+
+    `options` son claves de UNINSTALL_OPTIONS; cada una se pasa como --<clave>.
+    Lanza ValueError si se cuela una opción desconocida.
+    """
+    valid = {key for key, _, _ in UNINSTALL_OPTIONS}
+    bad = [o for o in options if o not in valid]
+    if bad:
+        raise ValueError(f"opciones de desinstalación desconocidas: {bad}")
+    return [str(VENV_PY), str(UNINSTALL_PY), *(f"--{o}" for o in options)]
 
 
 def build_task_command(install: bool) -> list[str]:
