@@ -35,7 +35,7 @@ VENV_DIR = REWARDS_DIR / ".venv"
 VENV_PY = VENV_DIR / "Scripts" / "python.exe"
 REQUIREMENTS = REWARDS_DIR / "requirements.txt"
 SETUP_CLI = REWARDS_DIR / "setup_cli.py"
-INSTALL_TASK_PS1 = REWARDS_DIR / "scheduler" / "install_task.ps1"
+WINUTIL = REWARDS_DIR / "winutil.py"
 
 # Repositorio del bot. El instalador, cuando se distribuye como setup.exe
 # SUELTO (sin el código al lado), clona esto para auto-aprovisionarse — así un
@@ -55,6 +55,17 @@ PANEL_EXE_URL = (
 SHORTCUT_NAME = "ms_rewards Panel.lnk"
 
 
+def icon_path() -> Path | None:
+    """Ruta del icono de la app (assets/icon.ico), o None. En el .exe vive en
+    sys._MEIPASS; en desarrollo, en la raíz del repo."""
+    base = Path(getattr(sys, "_MEIPASS", ROOT))
+    ico = base / "assets" / "icon.ico"
+    if ico.exists():
+        return ico
+    ico = ROOT / "assets" / "icon.ico"
+    return ico if ico.exists() else None
+
+
 def desktop_dir() -> Path:
     """Carpeta del Escritorio del usuario."""
     return Path.home() / "Desktop"
@@ -71,27 +82,27 @@ def desktop_shortcut_path() -> Path:
 
 
 def create_shortcut_cmd(
+    venv_python: str | os.PathLike,
+    winutil: str | os.PathLike,
     target: str | os.PathLike,
     shortcut: str | os.PathLike,
     workdir: str | os.PathLike,
 ) -> list[str]:
     """
-    Comando PowerShell que crea un acceso directo (.lnk) vía WScript.Shell.
-    Sin dependencias extra: usa el COM nativo de Windows.
+    Crea un acceso directo (.lnk) en Python puro: invoca winutil.py con el python
+    del venv (que tiene pywin32). Sin PowerShell.
     """
-    # PowerShell escapa la comilla simple duplicándola dentro de '...'; así
-    # rutas con apóstrofo (p.ej. C:\Users\O'Brien\...) no rompen el script.
-    def _q(p: str | os.PathLike) -> str:
-        return str(p).replace("'", "''")
+    return [
+        str(venv_python), str(winutil), "shortcut",
+        str(target), str(shortcut), str(workdir),
+    ]
 
-    ps = (
-        "$w = New-Object -ComObject WScript.Shell; "
-        f"$s = $w.CreateShortcut('{_q(shortcut)}'); "
-        f"$s.TargetPath = '{_q(target)}'; "
-        f"$s.WorkingDirectory = '{_q(workdir)}'; "
-        "$s.Save()"
-    )
-    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
+
+def install_task_cmd(
+    venv_python: str | os.PathLike, winutil: str | os.PathLike
+) -> list[str]:
+    """Registra la Scheduled Task vía winutil (Python puro, sin PowerShell)."""
+    return [str(venv_python), str(winutil), "task-install"]
 
 
 @dataclass(frozen=True)
@@ -126,8 +137,8 @@ class InstallPaths:
         return self.rewards_dir / "setup_cli.py"
 
     @property
-    def install_task_ps1(self) -> Path:
-        return self.rewards_dir / "scheduler" / "install_task.ps1"
+    def winutil(self) -> Path:
+        return self.rewards_dir / "winutil.py"
 
     @property
     def has_source(self) -> bool:

@@ -240,28 +240,12 @@ async def launch(visible: bool = True) -> AsyncIterator[BrowserContext]:
 def shutdown_chrome() -> None:
     """Mata cualquier proceso del navegador colgado del user-data-dir del bot."""
     try:
-        # OJO: el navegador lanza varios procesos hijo (renderer, gpu, utility),
-        # todos con el --user-data-dir en su CommandLine. Al matar el padre, los
-        # hijos mueren solos; por eso un Stop-Process -Id sobre cada PID falla
-        # con "No se encuentra ningún proceso..." en los que ya murieron. Hay que
-        # silenciar ese error (-ErrorAction SilentlyContinue) o ensucia la
-        # consola del setup con volcados de PowerShell aparatosos pero inocuos.
-        subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                (
-                    f"Get-CimInstance Win32_Process -Filter \"Name='{config.BROWSER_PROC}'\" | "
-                    f"Where-Object {{ $_.CommandLine -like '*{config.USER_DATA_DIR}*' }} | "
-                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
-                    "-ErrorAction SilentlyContinue }"
-                ),
-            ],
-            timeout=10,
-            check=False,
-            capture_output=True,  # no volcar nada a la consola pase lo que pase
-        )
+        # El navegador lanza varios procesos hijo (renderer, gpu, utility), todos
+        # con el --user-data-dir en su CommandLine. winutil los mata en Python
+        # puro (WMI); matar el padre arrastra a los hijos y los ya-muertos se
+        # ignoran en silencio.
+        import winutil
+        winutil.kill_browser_processes(config.BROWSER_PROC, config.USER_DATA_DIR)
     except Exception as exc:
         log.warning("shutdown_chrome: %s", exc)
 

@@ -11,7 +11,7 @@ Repo: https://github.com/Jabry-Bot/ms-rewards-bot
 1. **`setup.exe`** — descárgalo **solo** desde [Releases](https://github.com/Jabry-Bot/ms-rewards-bot/releases) y ejecútalo. Es autocontenido (trae su propio Python) y se basta solo: instala Python, Git y Edge si faltan, **clona el repo** en una carpeta de instalación (así sigue recibiendo auto-updates por `git pull`), crea el `.venv`, instala dependencias, descarga el panel, **crea un acceso directo en el Escritorio**, configura la cuenta y registra la Scheduled Task. No necesitas nada preinstalado ni clonar a mano.
 2. **`MsRewardsPanel.exe`** — el día a día (lo abres desde el acceso directo del Escritorio): ejecutar, estado en vivo, cambiar cuenta, login, registrar/quitar tarea, logs y **🧹 Desinstalar**. **Al abrirlo busca y aplica actualizaciones** automáticamente.
 
-> Para usuarios avanzados o si el antivirus bloquea el `.exe`, hay un instalador por consola en [`scripts/setup.bat`](scripts/setup.bat) (requiere clonar el repo con git primero).
+> Para dev / maintainer, o si el antivirus bloquea el `.exe`, puedes lanzar el instalador como Python puro: `python scripts/run_setup.py` (tras clonar el repo). No hay scripts de shell.
 
 El instalador hace todo el trabajo:
 
@@ -105,7 +105,7 @@ Botón **🧹 Desinstalar** del panel: elige qué quitar (tarea programada, esta
 | `ms_rewards/runstate.py`         | Estado diario (idempotencia)                                    |
 | `ms_rewards/credentials.py`      | Cifrado DPAPI de email/pass                                     |
 | `ms_rewards/setup_cli.py`        | CLI interactivo de cuenta (invocado por `setup.exe`)            |
-| `ms_rewards/scheduler/`          | Scripts PowerShell para gestionar la tarea programada           |
+| `ms_rewards/winutil.py`          | Tarea programada, acceso directo, env y procesos (Python/pywin32)|
 
 ## Volatilidad de selectores
 

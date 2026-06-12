@@ -6,7 +6,7 @@ las demás: si una falla, las restantes siguen ejecutándose. Si no se pasa
 ningún flag, no hace nada y avisa.
 
 Flags disponibles:
-  --task         Quita la Scheduled Task (ejecuta scheduler/uninstall_task.ps1).
+  --task         Quita la Scheduled Task (winutil, Python puro).
   --state        Borra el estado de ejecución (state/last_run.json).
   --credentials  Borra las credenciales cifradas (state/credentials.bin).
   --profile      Cierra el navegador del bot y borra su perfil (sesión iniciada).
@@ -23,52 +23,23 @@ from __future__ import annotations
 
 import argparse
 import logging
-import subprocess
 import sys
-from pathlib import Path
 
 import config
 import credentials
 import switch_account as switch
+import winutil
 
 log = logging.getLogger("uninstall")
 
-# Variables de entorno persistentes que el setup pudo crear con setx.
-_ENV_VARS = [
-    "MSR_USER_ID",
-    "MSR_BROWSER",
-    "MSR_MAINTAINER",
-    "MSR_OLLAMA_URL",
-    "MSR_OLLAMA_MODEL",
-    "MSR_USER_DATA_DIR",
-    "MSR_SEARCH_COUNT",
-    "MSR_LOCALE",
-    "MSR_CDP_PORT",
-    "MSR_CHROME_PATH",
-]
-
 
 def _remove_task() -> None:
-    """Quita la Scheduled Task ejecutando el script PowerShell del repo."""
+    """Quita la Scheduled Task (winutil, Python puro)."""
     print("[*] Quitando tarea programada...")
-    ps1 = Path(__file__).parent / "scheduler" / "uninstall_task.ps1"
-    if not ps1.exists():
-        print(f"  AVISO: no se encontró {ps1}. Nada que hacer.")
-        return
-    out = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=60,
-    )
-    salida = (out.stdout or "").strip()
-    if salida:
-        for linea in salida.splitlines():
-            print(f"  {linea}")
-    if out.returncode == 0:
-        print("  OK.")
+    if winutil.uninstall_task():
+        print("  OK, tarea eliminada.")
     else:
-        err = (out.stderr or "").strip()
-        print(f"  AVISO: el script devolvió código {out.returncode}. {err}")
+        print("  No estaba registrada. Nada que hacer.")
 
 
 def _remove_state() -> None:
@@ -114,21 +85,8 @@ def _remove_profile() -> None:
 def _remove_env() -> None:
     """Quita las variables de entorno persistentes del usuario (MSR_*)."""
     print("[*] Quitando variables de entorno persistentes (MSR_*)...")
-    for var in _ENV_VARS:
-        try:
-            out = subprocess.run(
-                ["reg", "delete", "HKCU\\Environment", "/F", "/V", var],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=15,
-            )
-            if out.returncode == 0:
-                print(f"  {var}: quitada.")
-            else:
-                # Lo más común: la variable no existía. No es un error real.
-                print(f"  {var}: no existía (ignorado).")
-        except Exception as exc:
-            print(f"  {var}: error al quitar ({exc}).")
-    print("  OK.")
+    removed = winutil.delete_env_vars()
+    print(f"  OK, {removed} variable(s) MSR_* eliminadas.")
 
 
 def main() -> int:

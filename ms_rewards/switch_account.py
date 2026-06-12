@@ -18,7 +18,6 @@ import asyncio
 import getpass
 import logging
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -33,19 +32,8 @@ log = logging.getLogger("switch")
 
 def _bot_chrome_count() -> int:
     """Cuántos procesos del navegador están abiertos sobre el perfil del bot."""
-    ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name='" + config.BROWSER_PROC + "'\" | "
-        "Where-Object { $_.CommandLine -like '*" + config.USER_DATA_DIR + "*' } | "
-        "Measure-Object | Select-Object -Expand Count"
-    )
-    try:
-        out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True, timeout=15,
-        )
-        return int((out.stdout or "0").strip() or "0")
-    except Exception:
-        return 0
+    import winutil
+    return winutil.count_browser_processes(config.BROWSER_PROC, config.USER_DATA_DIR)
 
 
 def _kill_and_wait(timeout: float = 15.0) -> bool:
@@ -180,7 +168,7 @@ def main() -> int:
     else:
         print(" El login NO se confirmó. Revisa email/contraseña o completa")
         print(" la verificación (2FA) en la ventana de Chrome y reintenta")
-        print(" ejecutando switch_account.bat de nuevo.")
+        print(" usando «Cambiar cuenta» en el panel de nuevo.")
     print("=" * 60)
     return 0 if ok else 2
 

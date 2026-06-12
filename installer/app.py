@@ -49,6 +49,12 @@ class App(ctk.CTk):
         self.title("ms_rewards — Instalador")
         self.geometry("760x640")
         self.minsize(680, 560)
+        try:
+            ico = boot.icon_path()
+            if ico:
+                self.iconbitmap(str(ico))
+        except Exception:
+            pass
 
         # Cola de líneas de log (alimentada desde hilos, drenada en la UI).
         self.log_queue: "queue.Queue[str]" = queue.Queue()
@@ -550,7 +556,9 @@ class App(ctk.CTk):
         if panel_exe.exists():
             shortcut = boot.desktop_shortcut_path()
             rc = self.run_and_capture(
-                boot.create_shortcut_cmd(panel_exe, shortcut, self.paths.base))
+                boot.create_shortcut_cmd(
+                    self.paths.venv_py, self.paths.winutil,
+                    panel_exe, shortcut, self.paths.base))
             if rc == 0:
                 self._log(f"   Acceso directo creado en el Escritorio: {shortcut}")
             else:
@@ -666,15 +674,13 @@ class App(ctk.CTk):
             return False
         self._log("   OK — configuración de cuenta completada.")
 
-        # 2) Registrar la Scheduled Task vía PowerShell (salida capturada).
+        # 2) Registrar la Scheduled Task en Python puro (winutil, sin PowerShell).
         self._log("\nRegistrando la tarea programada…")
-        rc = self.run_and_capture([
-            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(self.paths.install_task_ps1),
-        ])
+        rc = self.run_and_capture(
+            boot.install_task_cmd(self.paths.venv_py, self.paths.winutil))
         if rc != 0:
             self._fail("No se pudo registrar la tarea programada.",
-                       f"install_task.ps1 devolvió código {rc}.")
+                       f"winutil task-install devolvió código {rc}.")
             return False
         self._log("   OK — tarea programada registrada.")
         return True

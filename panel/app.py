@@ -141,6 +141,12 @@ class App(ctk.CTk):
         self.title("ms_rewards — Panel de control")
         self.geometry("900x620")
         self.minsize(820, 560)
+        try:
+            ico = core.icon_path()
+            if ico:
+                self.iconbitmap(str(ico))
+        except Exception:
+            pass
 
         # Estado de ejecución de subprocesos.
         self.proc: subprocess.Popen | None = None

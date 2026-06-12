@@ -32,12 +32,10 @@ VENV_PY = REWARDS_DIR / ".venv" / "Scripts" / "python.exe"
 RUN_PY = REWARDS_DIR / "run.py"
 SWITCH_PY = REWARDS_DIR / "switch_account.py"
 UNINSTALL_PY = REWARDS_DIR / "uninstall.py"
+WINUTIL_PY = REWARDS_DIR / "winutil.py"
 STATE_DIR = REWARDS_DIR / "state"
 LAST_RUN_PATH = STATE_DIR / "last_run.json"
 LOG_DIR = REWARDS_DIR / "logs"
-SCHEDULER_DIR = REWARDS_DIR / "scheduler"
-INSTALL_TASK_PS1 = SCHEDULER_DIR / "install_task.ps1"
-UNINSTALL_TASK_PS1 = SCHEDULER_DIR / "uninstall_task.ps1"
 
 TASK_NAME = "MsRewardsBot"
 
@@ -87,8 +85,21 @@ ACTIONS: dict[str, Action] = {
 
 
 def venv_ready() -> bool:
-    """True si el entorno virtual del bot existe (setup.bat ya corrió)."""
+    """True si el entorno virtual del bot existe (setup.exe ya corrió)."""
     return VENV_PY.exists()
+
+
+def icon_path() -> Path | None:
+    """
+    Ruta del icono de la app (assets/icon.ico), o None si no existe. En el .exe
+    de PyInstaller los datos se extraen a sys._MEIPASS; en desarrollo, al repo.
+    """
+    base = Path(getattr(sys, "_MEIPASS", ROOT))
+    ico = base / "assets" / "icon.ico"
+    if ico.exists():
+        return ico
+    ico = ROOT / "assets" / "icon.ico"
+    return ico if ico.exists() else None
 
 
 def build_update_command() -> list[str]:
@@ -145,30 +156,17 @@ def build_uninstall_command(options: list[str]) -> list[str]:
 
 
 def build_task_command(install: bool) -> list[str]:
-    """PowerShell para registrar (install=True) o quitar la Scheduled Task."""
-    ps1 = INSTALL_TASK_PS1 if install else UNINSTALL_TASK_PS1
-    return [
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", str(ps1),
-    ]
+    """Registra (install=True) o quita la Scheduled Task vía winutil (Python puro)."""
+    sub = "task-install" if install else "task-uninstall"
+    return [str(VENV_PY), str(WINUTIL_PY), sub]
 
 
 def build_task_query_command() -> list[str]:
     """
-    PowerShell que emite en JSON el estado de la Scheduled Task. La GUI parsea
-    la salida con `parse_task_query`. Devuelve `{}` si la tarea no existe.
+    Comando que emite en JSON el estado de la Scheduled Task (winutil task-status,
+    Python puro). La GUI parsea la salida con `parse_task_query`; `{}` si no existe.
     """
-    script = (
-        f"$t = Get-ScheduledTask -TaskName '{TASK_NAME}' "
-        "-ErrorAction SilentlyContinue; "
-        "if ($null -eq $t) { '{}' } else { "
-        f"$i = Get-ScheduledTaskInfo -TaskName '{TASK_NAME}'; "
-        "[pscustomobject]@{ state = [string]$t.State; "
-        "last_run = [string]$i.LastRunTime; "
-        "last_result = $i.LastTaskResult; "
-        "next_run = [string]$i.NextRunTime } | ConvertTo-Json -Compress }"
-    )
-    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+    return [str(VENV_PY), str(WINUTIL_PY), "task-status"]
 
 
 def parse_task_query(stdout: str) -> dict[str, Any]:

@@ -200,8 +200,8 @@ def test_install_paths_derived_files(tmp_path):
     assert p.requirements.name == "requirements.txt"
     assert p.setup_cli == p.rewards_dir / "setup_cli.py"
     assert p.setup_cli.name == "setup_cli.py"
-    assert p.install_task_ps1 == p.rewards_dir / "scheduler" / "install_task.ps1"
-    assert p.install_task_ps1.name == "install_task.ps1"
+    assert p.winutil == p.rewards_dir / "winutil.py"
+    assert p.winutil.name == "winutil.py"
 
 
 def test_install_paths_has_source(tmp_path):
@@ -288,19 +288,34 @@ def test_desktop_shortcut_path():
 
 # --- create_shortcut_cmd -------------------------------------------------
 def test_create_shortcut_cmd(tmp_path):
+    venv_python = tmp_path / "python.exe"
+    winutil = tmp_path / "winutil.py"
     target = tmp_path / "MsRewardsPanel.exe"
     shortcut = tmp_path / "ms_rewards Panel.lnk"
     workdir = tmp_path / "install"
-    cmd = boot.create_shortcut_cmd(target, shortcut, workdir)
+    cmd = boot.create_shortcut_cmd(venv_python, winutil, target, shortcut, workdir)
     assert isinstance(cmd, list)
-    assert cmd[0] == "powershell"
-    assert "-Command" in cmd
-    script = cmd[-1]
-    for fragment in (
-        str(target),
-        str(shortcut),
-        str(workdir),
-        "WScript.Shell",
-        "CreateShortcut",
-    ):
-        assert fragment in script
+    assert "powershell" not in cmd
+    assert not any("WScript.Shell" in part for part in cmd)
+    assert cmd[0] == str(venv_python)
+    assert cmd[1] == str(winutil)
+    assert cmd[2] == "shortcut"
+    for fragment in (str(target), str(shortcut), str(workdir)):
+        assert fragment in cmd
+
+
+# --- install_task_cmd ----------------------------------------------------
+def test_install_task_cmd(tmp_path):
+    venv_python = tmp_path / "python.exe"
+    winutil = tmp_path / "winutil.py"
+    assert boot.install_task_cmd(venv_python, winutil) == [
+        str(venv_python),
+        str(winutil),
+        "task-install",
+    ]
+
+
+# --- icon_path -----------------------------------------------------------
+def test_icon_path_returns_path_or_none():
+    result = boot.icon_path()
+    assert result is None or isinstance(result, Path)

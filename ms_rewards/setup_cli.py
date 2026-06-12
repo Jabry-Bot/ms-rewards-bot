@@ -2,7 +2,7 @@
 Asistente interactivo de instalación: USER_ID, credenciales, login asistido,
 opcionalmente modo maintainer.
 
-Se invoca desde setup.bat tras instalar dependencias.
+Se invoca desde setup.exe tras instalar dependencias.
 """
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import getpass
 import logging
 import os
 import socket
-import subprocess
 import sys
 
 import config
@@ -22,14 +21,15 @@ log = logging.getLogger("setup")
 
 
 def _setx(name: str, value: str) -> None:
-    """Persistir variable de entorno del usuario actual (HKCU)."""
+    """Persistir variable de entorno del usuario actual (HKCU), en Python puro."""
     try:
-        subprocess.run(["setx", name, value], capture_output=True, text=True, check=False)
-        # `setx` no afecta a la sesión actual; lo seteamos también en os.environ
+        import winutil
+        winutil.set_env_var(name, value)
+        # No afecta a la sesión actual; lo seteamos también en os.environ
         # para que el resto del setup_cli use el nuevo valor.
         os.environ[name] = value
     except Exception as exc:
-        log.warning("setx %s falló: %s", name, exc)
+        log.warning("set_env_var %s falló: %s", name, exc)
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -125,7 +125,7 @@ def main() -> int:
     else:
         print(
             "\n>> Login NO confirmado. Revisa email/contraseña o completa la\n"
-            "   verificación manual en Chrome cuando vuelvas a ejecutar setup.bat.\n"
+            "   verificación manual en Chrome cuando vuelvas a ejecutar setup.exe.\n"
         )
 
     # 4) Maintainer mode (opcional)
@@ -145,10 +145,10 @@ def main() -> int:
     print(f" Navegador       : {config.BROWSER} (channel={config.CHANNEL})")
     print(f" Perfil          : {config.USER_DATA_DIR}")
     print(f" Credenciales    : {'guardadas' if credentials.load() else 'NO guardadas'}")
-    print(f" Sesión activa   : {'sí' if ok else 'no — re-ejecuta setup.bat'}")
+    print(f" Sesión activa   : {'sí' if ok else 'no — re-ejecuta setup.exe'}")
     print(f" Maintainer mode : {'sí' if os.environ.get('MSR_MAINTAINER') == '1' else 'no'}")
     print("============================================================\n")
-    print("setup.bat continuará registrando la Scheduled Task de Windows.\n")
+    print("El instalador continuará registrando la Scheduled Task de Windows.\n")
     return 0 if ok else 2
 
 

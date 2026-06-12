@@ -88,26 +88,43 @@ def test_build_switch_command():
     assert core.build_switch_command() == [str(core.VENV_PY), str(core.SWITCH_PY)]
 
 
+# --- WINUTIL_PY ----------------------------------------------------------
+def test_winutil_py_ruta():
+    assert isinstance(core.WINUTIL_PY, Path)
+    assert core.WINUTIL_PY.name == "winutil.py"
+    assert core.WINUTIL_PY == core.REWARDS_DIR / "winutil.py"
+
+
 # --- build_task_command --------------------------------------------------
 def test_build_task_command_install():
-    cmd = core.build_task_command(True)
-    assert "powershell" in cmd
-    assert "-File" in cmd
-    assert any("install_task.ps1" in part for part in cmd)
+    assert core.build_task_command(True) == [
+        str(core.VENV_PY),
+        str(core.WINUTIL_PY),
+        "task-install",
+    ]
 
 
 def test_build_task_command_uninstall():
-    cmd = core.build_task_command(False)
-    assert "powershell" in cmd
-    assert "-File" in cmd
-    assert any("uninstall_task.ps1" in part for part in cmd)
+    assert core.build_task_command(False) == [
+        str(core.VENV_PY),
+        str(core.WINUTIL_PY),
+        "task-uninstall",
+    ]
 
 
 # --- build_task_query_command --------------------------------------------
 def test_build_task_query_command():
-    cmd = core.build_task_query_command()
-    assert "powershell" in cmd
-    assert any(core.TASK_NAME in part for part in cmd)
+    assert core.build_task_query_command() == [
+        str(core.VENV_PY),
+        str(core.WINUTIL_PY),
+        "task-status",
+    ]
+
+
+# --- icon_path -----------------------------------------------------------
+def test_icon_path_returns_path_or_none():
+    result = core.icon_path()
+    assert result is None or isinstance(result, Path)
 
 
 # --- parse_task_query ----------------------------------------------------
