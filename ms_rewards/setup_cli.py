@@ -66,11 +66,22 @@ def main() -> int:
     default_user = os.environ.get("MSR_USER_ID") or socket.gethostname()
     user_id = _ask("Identificador para esta instalación", default_user)
     _setx("MSR_USER_ID", user_id)
-    # Recargar config para que USER_DATA_DIR refleje el nuevo USER_ID
+
+    # 1.b) Navegador: Chrome o Edge. Edge da el bonus de búsquedas de Rewards.
+    default_browser = os.environ.get("MSR_BROWSER", "chrome").lower()
+    browser = _ask("Navegador a usar (chrome/edge)", default_browser).strip().lower()
+    if browser not in ("chrome", "edge"):
+        print(f"  '{browser}' no válido, usando chrome.")
+        browser = "chrome"
+    _setx("MSR_BROWSER", browser)
+
+    # Recargar config para que USER_DATA_DIR / CHANNEL reflejen los nuevos valores
     import importlib
     importlib.reload(config)
 
-    print(f"\n>> Perfil de Chrome: {config.USER_DATA_DIR}\n")
+    print(f"\n>> Navegador: {config.BROWSER} (channel={config.CHANNEL})")
+    print(f">> Ejecutable: {config.CHROME_PATH}")
+    print(f">> Perfil: {config.USER_DATA_DIR}\n")
 
     # 2) Reset robusto + credenciales (mismo flujo que switch_account.bat):
     #    cierra el Chrome del bot, espera, borra el perfil viejo y las
@@ -131,7 +142,8 @@ def main() -> int:
     print(" Resumen")
     print("============================================================")
     print(f" USER_ID         : {user_id}")
-    print(f" Perfil Chrome   : {config.USER_DATA_DIR}")
+    print(f" Navegador       : {config.BROWSER} (channel={config.CHANNEL})")
+    print(f" Perfil          : {config.USER_DATA_DIR}")
     print(f" Credenciales    : {'guardadas' if credentials.load() else 'NO guardadas'}")
     print(f" Sesión activa   : {'sí' if ok else 'no — re-ejecuta setup.bat'}")
     print(f" Maintainer mode : {'sí' if os.environ.get('MSR_MAINTAINER') == '1' else 'no'}")

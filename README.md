@@ -20,6 +20,7 @@ El instalador hace todo el trabajo:
 - Crea `.venv` e instala dependencias (`patchright`, `httpx`, `pywin32`).
 - Te pide:
   - **USER_ID** identificador para esta máquina (default = hostname).
+  - **Navegador** a usar: `chrome` o `edge` (default `chrome`). Ambos funcionan igual; **Edge da el bonus de búsquedas de Microsoft Rewards**, así que rinde más puntos. Requiere tener ese navegador instalado.
   - **Email y contraseña** de tu cuenta Microsoft. Se guardan cifrados localmente con DPAPI; nunca salen de tu PC.
   - Si esta máquina es del **maintainer** (auto-fix con Ollama). Si no sabes lo que es, di que no.
 - Abre Chrome y hace login automáticamente.

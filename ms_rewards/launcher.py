@@ -177,7 +177,7 @@ async def launch(visible: bool = True) -> AsyncIterator[BrowserContext]:
     async def _open(pw):
         return await pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data),
-            channel="chrome",
+            channel=config.CHANNEL,
             headless=False,
             args=launch_args,
             no_viewport=True,  # respeta el tamaño real de ventana
@@ -209,7 +209,7 @@ async def launch(visible: bool = True) -> AsyncIterator[BrowserContext]:
         )
 
     async with async_playwright() as pw:
-        log.info("lanzando Chrome (channel=chrome, profile=%s)", user_data)
+        log.info("lanzando navegador (channel=%s, profile=%s)", config.CHANNEL, user_data)
         try:
             context = await _open(pw)
         except Exception as exc:
@@ -238,12 +238,12 @@ async def launch(visible: bool = True) -> AsyncIterator[BrowserContext]:
 
 
 def shutdown_chrome() -> None:
-    """Mata cualquier chrome.exe colgado del user-data-dir del bot."""
+    """Mata cualquier proceso del navegador colgado del user-data-dir del bot."""
     try:
-        # OJO: Chrome lanza varios procesos hijo (renderer, gpu, utility), todos
-        # con el --user-data-dir en su CommandLine. Al matar el padre, los hijos
-        # mueren solos; por eso un Stop-Process -Id sobre cada PID falla con
-        # "No se encuentra ningún proceso..." en los que ya murieron. Hay que
+        # OJO: el navegador lanza varios procesos hijo (renderer, gpu, utility),
+        # todos con el --user-data-dir en su CommandLine. Al matar el padre, los
+        # hijos mueren solos; por eso un Stop-Process -Id sobre cada PID falla
+        # con "No se encuentra ningún proceso..." en los que ya murieron. Hay que
         # silenciar ese error (-ErrorAction SilentlyContinue) o ensucia la
         # consola del setup con volcados de PowerShell aparatosos pero inocuos.
         subprocess.run(
@@ -252,7 +252,7 @@ def shutdown_chrome() -> None:
                 "-NoProfile",
                 "-Command",
                 (
-                    "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+                    f"Get-CimInstance Win32_Process -Filter \"Name='{config.BROWSER_PROC}'\" | "
                     f"Where-Object {{ $_.CommandLine -like '*{config.USER_DATA_DIR}*' }} | "
                     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
                     "-ErrorAction SilentlyContinue }"

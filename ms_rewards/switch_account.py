@@ -32,9 +32,9 @@ log = logging.getLogger("switch")
 
 
 def _bot_chrome_count() -> int:
-    """Cuántos chrome.exe están abiertos sobre el perfil del bot."""
+    """Cuántos procesos del navegador están abiertos sobre el perfil del bot."""
     ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Get-CimInstance Win32_Process -Filter \"Name='" + config.BROWSER_PROC + "'\" | "
         "Where-Object { $_.CommandLine -like '*" + config.USER_DATA_DIR + "*' } | "
         "Measure-Object | Select-Object -Expand Count"
     )

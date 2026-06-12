@@ -5,9 +5,47 @@ import os
 import socket
 from pathlib import Path
 
-CHROME_PATH = os.getenv(
-    "MSR_CHROME_PATH",
+# Navegador a usar: "chrome" o "edge". Ambos son Chromium, así que el bot
+# funciona igual; Edge además otorga el bonus de búsquedas de Microsoft Rewards.
+BROWSER = os.getenv("MSR_BROWSER", "chrome").strip().lower()
+if BROWSER not in ("chrome", "edge"):
+    BROWSER = "chrome"
+
+# Canal que usa patchright/Playwright en launch_persistent_context. Es lo que
+# decide qué navegador real del sistema se lanza.
+CHANNEL = "msedge" if BROWSER == "edge" else "chrome"
+
+# Nombre del proceso del navegador (para matar/contar instancias del bot).
+BROWSER_PROC = "msedge.exe" if BROWSER == "edge" else "chrome.exe"
+
+
+def _first_existing(paths: list[str], fallback: str) -> str:
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return fallback
+
+
+_CHROME_DEFAULT = _first_existing(
+    [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ],
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+)
+_EDGE_DEFAULT = _first_existing(
+    [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ],
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+)
+
+# Ruta al ejecutable del navegador (se usa en el spawn standalone del modo
+# --setup; launch_persistent_context resuelve el ejecutable vía CHANNEL).
+# MSR_CHROME_PATH la sobreescribe si el usuario instaló el navegador en otra ruta.
+CHROME_PATH = os.getenv("MSR_CHROME_PATH") or (
+    _EDGE_DEFAULT if BROWSER == "edge" else _CHROME_DEFAULT
 )
 
 # Identificador del usuario que ejecuta esta instancia. Se usa para:
