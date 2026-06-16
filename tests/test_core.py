@@ -83,6 +83,26 @@ def test_build_run_command_accion_desconocida():
         core.build_run_command("no_existe")
 
 
+def test_build_run_command_hidden_añade_flag():
+    cmd = core.build_run_command("run_all", hidden=True)
+    assert cmd[2:] == ["--force", "--hidden"]
+
+
+def test_build_run_command_visible_por_defecto():
+    assert "--hidden" not in core.build_run_command("run_all")
+    assert "--hidden" not in core.build_run_command("run_all", hidden=False)
+
+
+def test_prompt_visibility_solo_en_corridas_del_bot():
+    # Las corridas que abren el navegador ofrecen elegir visible/oculto.
+    assert core.ACTIONS["run_all"].prompt_visibility is True
+    assert core.ACTIONS["daily"].prompt_visibility is True
+    assert core.ACTIONS["searches"].prompt_visibility is True
+    # login debe ser visible sí o sí; kill no abre navegador.
+    assert core.ACTIONS["login"].prompt_visibility is False
+    assert core.ACTIONS["kill"].prompt_visibility is False
+
+
 # --- build_switch_command ------------------------------------------------
 def test_build_switch_command():
     assert core.build_switch_command() == [str(core.VENV_PY), str(core.SWITCH_PY)]

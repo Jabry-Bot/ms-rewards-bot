@@ -140,6 +140,61 @@ class UninstallDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+class VisibilityDialog(ctk.CTkToplevel):
+    """Diálogo modal: elegir primer plano (navegador visible) o segundo plano
+    (oculto) antes de una corrida manual del bot.
+
+    `self.result` queda como False (primer plano), True (segundo plano/oculto)
+    si el usuario elige, o None si cancela.
+    """
+
+    def __init__(self, master, action_label: str):
+        super().__init__(master)
+        self.title("¿Cómo ejecutar?")
+        self.geometry("420x250")
+        self.resizable(False, False)
+        self.result: bool | None = None
+
+        ctk.CTkLabel(self, text=action_label, font=("", 15, "bold")).pack(
+            pady=(20, 6))
+        ctk.CTkLabel(
+            self,
+            text="¿Quieres ver el navegador mientras trabaja, o que corra\n"
+                 "oculto en segundo plano para que no te moleste?",
+            justify="center",
+        ).pack(padx=20, pady=(0, 16))
+
+        ctk.CTkButton(
+            self, text="🖥  Primer plano  (ver el navegador)",
+            height=42, command=lambda: self._choose(False),
+        ).pack(fill="x", padx=24, pady=5)
+        ctk.CTkButton(
+            self, text="🌙  Segundo plano  (oculto, no molesta)",
+            height=42, fg_color="gray30", hover_color="gray25",
+            command=lambda: self._choose(True),
+        ).pack(fill="x", padx=24, pady=5)
+        ctk.CTkButton(
+            self, text="Cancelar", height=28, fg_color="transparent",
+            text_color="gray60", hover_color="gray20",
+            command=self._cancel,
+        ).pack(fill="x", padx=24, pady=(8, 4))
+
+        # Modal: capturar foco y bloquear la ventana principal.
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+
+    def _choose(self, hidden: bool):
+        self.result = hidden
+        self.grab_release()
+        self.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.grab_release()
+        self.destroy()
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -335,7 +390,14 @@ class App(ctk.CTk):
                     f"¿Seguro que quieres «{action.label.strip()}»?\n\n"
                     f"{action.description}"):
                 return
-        self._launch(core.build_run_command(action.id),
+        hidden = False
+        if action.prompt_visibility:
+            dialog = VisibilityDialog(self, action.label.strip())
+            self.wait_window(dialog)
+            if dialog.result is None:
+                return  # canceló
+            hidden = dialog.result
+        self._launch(core.build_run_command(action.id, hidden=hidden),
                      title=action.label.strip())
 
     def _on_switch_account(self):

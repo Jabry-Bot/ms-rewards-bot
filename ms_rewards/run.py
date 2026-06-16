@@ -320,6 +320,9 @@ def main() -> int:
                         help="salta el auto-update (git pull)")
     parser.add_argument("--scheduled", action="store_true",
                         help="marca la corrida como automática (oculta la ventana de Chrome)")
+    parser.add_argument("--hidden", action="store_true",
+                        help="fuerza el navegador oculto en una corrida manual "
+                             "(segundo plano, para que no moleste)")
     parser.add_argument("--update-only", action="store_true",
                         help="solo comprueba/aplica el auto-update (git pull) y sale")
     args = parser.parse_args()
@@ -383,8 +386,9 @@ def _main_locked(args, log) -> int:
     do_daily = args.daily or (not args.daily and not args.searches)
     do_searches = args.searches or (not args.daily and not args.searches)
 
-    # Ventana visible salvo en la corrida automática programada.
-    visible = not _is_automatic_run(args.scheduled)
+    # Ventana visible salvo en la corrida automática programada o si el usuario
+    # pidió explícitamente segundo plano (--hidden) en una corrida manual.
+    visible = not (_is_automatic_run(args.scheduled) or args.hidden)
 
     try:
         searches_done, mobile_searches_done, daily_done, info = asyncio.run(

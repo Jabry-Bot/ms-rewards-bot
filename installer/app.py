@@ -69,6 +69,9 @@ class App(ctk.CTk):
         self._tool_rows: list[tuple[ctk.CTkLabel, ctk.CTkLabel]] = []
         # Flag para no lanzar dos secuencias a la vez.
         self._busy = False
+        # True si el login quedó sin confirmar en la última configuración (la
+        # tarea se registra igual, pero hay que completar el 2FA luego).
+        self._login_pending = False
 
         # --- Carpeta de instalación ----------------------------------------
         # In-repo: el dev/maintainer ejecuta dentro del repo (ms_rewards/ al
@@ -661,12 +664,23 @@ class App(ctk.CTk):
 
         if ok:
             self._set_status("Configuración completada.")
-            self._log("\n✅ ¡Todo listo! Cuenta configurada y tarea registrada.")
-            self.after(0, lambda: messagebox.showinfo(
-                "ms_rewards",
-                "¡Instalación finalizada!\n\nLa cuenta está configurada y la "
-                "tarea programada quedó registrada. El bot correrá automáticamente.",
-            ))
+            if getattr(self, "_login_pending", False):
+                self._log("\n✅ Tarea registrada. ⚠ Falta confirmar el login: "
+                          "ábrelo desde el panel («Login manual») para completar el 2FA.")
+                self.after(0, lambda: messagebox.showinfo(
+                    "ms_rewards",
+                    "¡Instalación finalizada!\n\nLa tarea programada quedó "
+                    "registrada y el bot correrá automáticamente.\n\nEso sí, el "
+                    "login no llegó a confirmarse (2FA/captcha pendiente): abre el "
+                    "panel y pulsa «Login manual» para terminar de iniciar sesión.",
+                ))
+            else:
+                self._log("\n✅ ¡Todo listo! Cuenta configurada y tarea registrada.")
+                self.after(0, lambda: messagebox.showinfo(
+                    "ms_rewards",
+                    "¡Instalación finalizada!\n\nLa cuenta está configurada y la "
+                    "tarea programada quedó registrada. El bot correrá automáticamente.",
+                ))
 
     def _run_configure(self) -> bool:
         # 1) Configuración interactiva en CONSOLA NUEVA (input/getpass/2FA).
@@ -687,11 +701,23 @@ class App(ctk.CTk):
         finally:
             self.proc = None
 
-        if rc != 0:
+        # setup_cli devuelve: 0 = todo OK; 2 = config guardada pero login no
+        # confirmado (2FA/captcha pendiente); 1 (u otro) = fallo real (email
+        # vacío, no se pudo limpiar la sesión…). El login pendiente NO debe
+        # impedir registrar la tarea: el bot reintentará el login en cada
+        # corrida con las credenciales guardadas, y el usuario puede completar
+        # el 2FA luego desde el panel. Solo abortamos ante un fallo real.
+        self._login_pending = rc == 2
+        if rc not in (0, 2):
             self._fail("La configuración de la cuenta no finalizó correctamente.",
                        f"setup_cli devolvió código {rc}.")
             return False
-        self._log("   OK — configuración de cuenta completada.")
+        if self._login_pending:
+            self._log("   ⚠ Login no confirmado (2FA/captcha pendiente), pero la "
+                      "configuración se guardó. Registro la tarea igualmente; "
+                      "completa el login luego desde el panel.")
+        else:
+            self._log("   OK — configuración de cuenta completada.")
 
         # 2) Registrar la Scheduled Task en Python puro (winutil, sin PowerShell).
         self._log("\nRegistrando la tarea programada…")

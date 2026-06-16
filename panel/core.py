@@ -52,6 +52,11 @@ class Action:
     # Si True, la GUI debería pedir confirmación antes de lanzar (acciones
     # destructivas o que abren ventanas de navegador para login manual).
     confirm: bool = False
+    # Si True, es una corrida del bot sobre el navegador y la GUI ofrece elegir
+    # primer plano (navegador visible) o segundo plano (oculto, no molesta)
+    # antes de lanzar. Las acciones que no abren navegador (kill) o que deben
+    # ser visibles sí o sí (login) lo dejan en False.
+    prompt_visibility: bool = False
 
 
 ACTIONS: dict[str, Action] = {
@@ -59,16 +64,19 @@ ACTIONS: dict[str, Action] = {
         "run_all", "▶  Ejecutar ahora",
         ("--force",),
         "Daily set + búsquedas desktop + móvil (forzado, ignora 'ya completado hoy').",
+        prompt_visibility=True,
     ),
     "daily": Action(
         "daily", "📋  Solo daily set",
         ("--daily", "--force"),
         "Resuelve únicamente el daily set / actividades.",
+        prompt_visibility=True,
     ),
     "searches": Action(
         "searches", "🔍  Solo búsquedas",
         ("--searches", "--force"),
         "Solo las búsquedas de Bing (desktop + móvil).",
+        prompt_visibility=True,
     ),
     "login": Action(
         "login", "🔐  Login manual",
@@ -111,18 +119,20 @@ def build_update_command() -> list[str]:
     return [str(VENV_PY), str(RUN_PY), "--update-only"]
 
 
-def build_run_command(action_id: str) -> list[str]:
+def build_run_command(action_id: str, hidden: bool = False) -> list[str]:
     """
     Línea de comando para una acción de run.py.
 
-    Lanza con `--no-update` cuando es una acción interactiva del panel para no
-    bloquear el arranque con un git pull; el auto-update sigue activo en la
-    corrida automática de la Scheduled Task.
+    `hidden=True` añade --hidden para que el navegador corra en segundo plano
+    (oculto) en una ejecución manual; por defecto la ventana es visible.
     """
     if action_id not in ACTIONS:
         raise KeyError(f"acción desconocida: {action_id!r}")
     action = ACTIONS[action_id]
-    return [str(VENV_PY), str(RUN_PY), *action.flags]
+    cmd = [str(VENV_PY), str(RUN_PY), *action.flags]
+    if hidden:
+        cmd.append("--hidden")
+    return cmd
 
 
 def build_switch_command() -> list[str]:
