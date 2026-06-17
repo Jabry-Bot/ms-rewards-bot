@@ -288,3 +288,44 @@ def test_build_update_command():
     assert cmd == [str(core.VENV_PY), str(core.RUN_PY), "--update-only"]
     assert cmd[0] == str(core.VENV_PY)
     assert cmd[-1] == "--update-only"
+
+
+# --- auto-actualización del .exe -----------------------------------------
+def test_vtuple_ordering():
+    assert core._vtuple("2.10.0") > core._vtuple("2.9.9")
+    assert core._vtuple("2.6.0") < core._vtuple("2.6.1")
+    assert core._vtuple("") == (0,)
+
+
+def test_self_update_false_when_not_frozen(monkeypatch):
+    monkeypatch.setattr(core, "is_frozen", lambda: False)
+    assert core.self_update_available() is False
+
+
+def test_self_update_true_when_disk_newer(monkeypatch, tmp_path):
+    vf = tmp_path / "VERSION"
+    vf.write_text("9.9.9", encoding="utf-8")
+    monkeypatch.setattr(core, "is_frozen", lambda: True)
+    monkeypatch.setattr(core, "build_version", lambda: "1.0.0")
+    monkeypatch.setattr(core, "VERSION_FILE", vf)
+    assert core.available_version() == "9.9.9"
+    assert core.self_update_available() is True
+    vf.write_text("1.0.0", encoding="utf-8")
+    assert core.self_update_available() is False
+
+
+def test_panel_exe_url():
+    assert core.PANEL_EXE_URL.startswith("https://")
+    assert core.PANEL_EXE_URL.endswith("MsRewardsPanel.exe")
+
+
+def test_swap_exe(tmp_path, monkeypatch):
+    exe = tmp_path / "MsRewardsPanel.exe"
+    exe.write_bytes(b"OLD")
+    new = tmp_path / "MsRewardsPanel.new.exe"
+    new.write_bytes(b"NEW")
+    monkeypatch.setattr(core.sys, "executable", str(exe))
+    core.swap_exe(new)
+    assert exe.read_bytes() == b"NEW"
+    assert (tmp_path / "MsRewardsPanel.old.exe").exists()
+    assert not new.exists()

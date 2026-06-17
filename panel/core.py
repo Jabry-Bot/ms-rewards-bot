@@ -11,7 +11,9 @@ La GUI (panel/app.py) y los tests (tests/test_core.py) consumen esta API.
 from __future__ import annotations
 
 import json
+import re
 import sys
+import urllib.request
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -95,6 +97,108 @@ ACTIONS: dict[str, Action] = {
 def venv_ready() -> bool:
     """True si el entorno virtual del bot existe (setup.exe ya corrió)."""
     return VENV_PY.exists()
+
+
+# --- Auto-actualización del propio .exe ----------------------------------
+# El .exe es un binario congelado: el git pull del bot actualiza el código
+# Python en disco, pero NO el .exe. Para que los cambios de GUI lleguen a los
+# usuarios, el panel comprueba al abrirse si la versión en disco (la que dejó
+# el último git pull) es mayor que la versión con la que se compiló este .exe;
+# si lo es, descarga el nuevo MsRewardsPanel.exe del release y lo intercambia.
+PANEL_EXE_NAME = "MsRewardsPanel.exe"
+PANEL_EXE_URL = (
+    "https://github.com/Jabry-Bot/ms-rewards-bot/releases/latest/download/"
+    + PANEL_EXE_NAME
+)
+VERSION_FILE = REWARDS_DIR / "VERSION"
+
+
+def is_frozen() -> bool:
+    """True si corremos dentro del .exe de PyInstaller."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def _read_version(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def build_version() -> str:
+    """Versión con la que se compiló este .exe (VERSION empaquetado dentro)."""
+    if is_frozen():
+        v = _read_version(Path(getattr(sys, "_MEIPASS", "")) / "VERSION")
+        if v:
+            return v
+    return _read_version(VERSION_FILE)
+
+
+def available_version() -> str:
+    """Versión del código en disco (la que dejó el último git pull)."""
+    return _read_version(VERSION_FILE)
+
+
+def _vtuple(s: str) -> tuple[int, ...]:
+    nums = re.findall(r"\d+", s or "")
+    return tuple(int(n) for n in nums) if nums else (0,)
+
+
+def self_update_available() -> bool:
+    """True si hay una versión del .exe más nueva que la compilada."""
+    if not is_frozen():
+        return False
+    b, a = build_version(), available_version()
+    if not b or not a:
+        return False
+    try:
+        return _vtuple(a) > _vtuple(b)
+    except Exception:
+        return False
+
+
+def current_exe() -> Path:
+    return Path(sys.executable)
+
+
+def _old_exe_path() -> Path:
+    exe = current_exe()
+    return exe.with_name(exe.stem + ".old.exe")
+
+
+def cleanup_old_exe() -> None:
+    """Borra el .old.exe que dejó una auto-actualización previa (ya no en uso)."""
+    if not is_frozen():
+        return
+    try:
+        old = _old_exe_path()
+        if old.exists():
+            old.unlink()
+    except Exception:
+        pass
+
+
+def download_panel_exe(dest: str | Path) -> None:
+    """Descarga el último MsRewardsPanel.exe del release a `dest`."""
+    urllib.request.urlretrieve(PANEL_EXE_URL, str(dest))
+
+
+def swap_exe(new_exe: str | Path) -> Path:
+    """
+    Sustituye el .exe en uso por `new_exe`: renombra el actual a .old.exe (en
+    Windows se puede renombrar un ejecutable en uso) y pone el nuevo en su sitio.
+    Devuelve la ruta final del .exe (la misma de siempre).
+    """
+    exe = current_exe()
+    old = _old_exe_path()
+    try:
+        if old.exists():
+            old.unlink()
+    except Exception:
+        pass
+    exe.rename(old)
+    Path(new_exe).rename(exe)
+    return exe
 
 
 def icon_path() -> Path | None:

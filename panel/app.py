@@ -213,6 +213,12 @@ class App(ctk.CTk):
         self.out_queue: queue.Queue[str | None] = queue.Queue()
         self.action_buttons: list[ctk.CTkButton] = []
         self._venv_ok = core.venv_ready()
+        # Callback a ejecutar cuando termine el proceso actual (p.ej. tras el
+        # auto-update, comprobar si hay que auto-actualizar el propio .exe).
+        self._on_done_cb = None
+
+        # Limpia el .old.exe que dejó una auto-actualización previa.
+        core.cleanup_old_exe()
 
         self._build_layout()
         self._poll_queue()      # bombea la cola de salida hacia el textbox
@@ -365,8 +371,10 @@ class App(ctk.CTk):
         nueva no falla). Si ya hay un proceso en marcha, no hace nada.
         """
         if self.proc is None and self._venv_ok:
+            # Al terminar el git pull, comprobar si hay un .exe más nuevo.
             self._launch(core.build_update_command(),
-                         title="Buscar actualizaciones")
+                         title="Buscar actualizaciones",
+                         on_done=self._maybe_self_update)
 
     def _query_task(self) -> dict:
         """Consulta el estado de la Scheduled Task (síncrono, salida pequeña)."""
@@ -448,13 +456,18 @@ class App(ctk.CTk):
             messagebox.showerror("Error", f"No se pudo abrir la carpeta:\n{exc}")
 
     # --- Ejecución de subprocesos ---------------------------------------
-    def _launch(self, cmd: list[str], title: str, stdin_data: str | None = None):
-        """Lanza un subproceso en segundo plano y vuelca su salida al log."""
+    def _launch(self, cmd: list[str], title: str, stdin_data: str | None = None,
+                on_done=None):
+        """Lanza un subproceso en segundo plano y vuelca su salida al log.
+
+        `on_done` (opcional) se llama en el hilo de UI cuando el proceso termina.
+        """
         if self.proc is not None:
             messagebox.showinfo("Ocupado",
                                 "Ya hay un proceso en marcha. Espera o cancélalo.")
             return
 
+        self._on_done_cb = on_done
         self._set_actions_enabled(False)
         self._append_log(f"\n$ {' '.join(cmd)}\n")
         self._append_log(f"--- {title} ---\n")
@@ -528,6 +541,50 @@ class App(ctk.CTk):
         self.cancel_btn.pack_forget()
         self._set_actions_enabled(True)
         self.refresh_status()
+        cb, self._on_done_cb = self._on_done_cb, None
+        if cb is not None:
+            try:
+                cb()
+            except Exception:
+                pass
+
+    # --- Auto-actualización del propio .exe ------------------------------
+    def _maybe_self_update(self):
+        """Tras el git pull: si hay un .exe más nuevo, descárgalo y reinicia."""
+        if not core.self_update_available():
+            return
+        self._append_log(
+            f"\n--- Nueva versión del panel disponible "
+            f"(v{core.available_version()}); descargando… ---\n")
+        self._set_actions_enabled(False)
+        threading.Thread(target=self._do_self_update, daemon=True).start()
+
+    def _do_self_update(self):
+        """(hilo) Descarga el nuevo .exe, lo intercambia y relanza."""
+        new = core.current_exe().with_name("MsRewardsPanel.new.exe")
+        try:
+            core.download_panel_exe(new)
+            core.swap_exe(new)
+        except Exception as exc:
+            self.out_queue.put(f"[WARN] auto-actualización fallida: {exc}\n")
+            self.after(0, lambda: self._set_actions_enabled(True))
+            return
+        self.out_queue.put("--- Panel actualizado. Reiniciando… ---\n")
+        self.after(400, self._relaunch_and_exit)
+
+    def _relaunch_and_exit(self):
+        """Lanza el .exe nuevo (ya en su sitio) y cierra este proceso."""
+        try:
+            subprocess.Popen([str(core.current_exe())],
+                             cwd=str(core.current_exe().parent),
+                             creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     def _cancel_proc(self):
         """Termina el proceso en marcha (proc.terminate)."""

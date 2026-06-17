@@ -111,6 +111,11 @@ def build_one(key: str, icon: Path | None) -> None:
     # Empaquetar la carpeta assets (icon.ico para iconbitmap + splash.png).
     if ASSETS.exists():
         cmd += ["--add-data", f"{ASSETS};assets"]
+    # Empaquetar VERSION: el panel compara esta (versión de compilación) con la
+    # del disco (git pull) para auto-actualizar su propio .exe.
+    version_file = ROOT / "ms_rewards" / "VERSION"
+    if version_file.exists():
+        cmd += ["--add-data", f"{version_file};."]
     cmd.append(str(t["entry"]))
     _run(cmd)
 
