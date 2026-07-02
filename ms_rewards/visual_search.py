@@ -30,6 +30,7 @@ import logging
 import os
 import random
 import tempfile
+from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page
 
@@ -41,9 +42,13 @@ log = logging.getLogger("visual_search")
 # Entrada canónica de la búsqueda visual de Bing.
 _IMAGES_URL = "https://www.bing.com/images"
 
-# PNG 1x1 gris válido (embebido) para no commitear un binario ni depender de
-# rutas de assets dentro del .exe. Bing acepta cualquier imagen; el tamaño no
-# importa para disparar el flujo de búsqueda por imagen (SBI).
+# Imagen a subir. Preferimos un asset REAL del repo (assets/logo.png): Bing
+# necesita una imagen con contenido reconocible para producir una SERP de
+# búsqueda visual (un PNG 1x1 no genera resultados). El bot corre desde el repo
+# clonado, así que assets/ está disponible. Fallback: PNG mínimo embebido.
+_ASSET_IMG = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
+
+# PNG 1x1 gris válido (embebido) como último recurso si falta el asset.
 _PNG_1X1_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
     "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -64,6 +69,13 @@ def _write_temp_image() -> str:
             pass
         raise
     return path
+
+
+def _image_path() -> tuple[str, bool]:
+    """Devuelve (ruta_imagen, es_temporal). Usa el asset real si existe."""
+    if _ASSET_IMG.exists():
+        return str(_ASSET_IMG), False
+    return _write_temp_image(), True
 
 
 async def _find_file_input(page: Page):
@@ -92,16 +104,19 @@ async def _find_file_input(page: Page):
 
 async def _confirm_visual_results(page: Page) -> bool:
     """
-    Confirma que estamos en la página de resultados de búsqueda visual. Tras
-    subir la imagen, Bing navega a /images/search?...&view=detailV2 (o con
-    sbisrc=UploadImage / insightsToken). Comprobamos la URL.
+    Confirma que la búsqueda visual se realizó. Tras subir la imagen, Bing sube
+    el blob (POST /images/kblob?iss=sbiupload) y navega a la SERP de la búsqueda
+    visual, típicamente /search?q=...&FORM=SBIIRP&bcid=... (o /images/search con
+    sbisrc). Detectamos esos marcadores en la URL.
     """
+    markers = ("form=sbiirp", "sbisrc", "/images/search", "bcid=")
     try:
-        await page.wait_for_url("**/images/search**", timeout=15_000)
+        await page.wait_for_url(
+            lambda u: any(m in (u or "").lower() for m in markers), timeout=15_000)
         return True
     except Exception:
         url = (page.url or "").lower()
-        return "/images/search" in url or "view=detailv2" in url or "sbi" in url
+        return any(m in url for m in markers)
 
 
 async def run_visual_search(context: BrowserContext) -> bool:
@@ -130,25 +145,24 @@ async def run_visual_search(context: BrowserContext) -> bool:
         await random_mouse_drift(page, moves=random.randint(1, 2))
     await sleep_jitter(1.0, 2.5)
 
-    img_path = None
+    img_path, is_temp = _image_path()
     try:
-        img_path = _write_temp_image()
         file_input = await _find_file_input(page)
         if file_input is None:
             log.warning("no se encontró el input file de búsqueda visual — abortando")
             return False
 
-        # Subir la imagen: dispara el onchange que arranca el flujo SBI de Bing
-        # y navega a la página de resultados de búsqueda visual.
+        # Subir la imagen: dispara el flujo SBI de Bing (POST /images/kblob) y
+        # navega a la SERP de la búsqueda visual.
         await file_input.set_input_files(img_path)
         log.info("imagen subida a la búsqueda visual de Bing")
         await sleep_jitter(2.5, 5.0)
 
         if not await _confirm_visual_results(page):
-            log.warning("tras subir la imagen no se llegó a la página de resultados visuales")
+            log.warning("tras subir la imagen no se llegó a la SERP de búsqueda visual")
             return False
 
-        # Comportarse como un humano leyendo los resultados visuales.
+        # Comportarse como un humano leyendo los resultados.
         await human_read(page, 4.0, 9.0)
         await human_scroll(page, random.randint(300, 800))
         await sleep_jitter(2.0, 4.0)
@@ -158,7 +172,7 @@ async def run_visual_search(context: BrowserContext) -> bool:
         log.error("búsqueda por imagen falló: %s", exc)
         return False
     finally:
-        if img_path:
+        if is_temp and img_path:
             try:
                 os.remove(img_path)
             except Exception:
