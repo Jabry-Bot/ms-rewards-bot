@@ -276,14 +276,31 @@ class App(ctk.CTk):
         self.status_label.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 10))
         frame.grid_rowconfigure(2, weight=1)
 
+        # --- Selector de navegador (Chrome / Edge) ---
+        # Persiste MSR_BROWSER para las próximas corridas y la tarea programada.
+        ctk.CTkLabel(frame, text="Navegador", font=("", 13, "bold")).grid(
+            row=3, column=0, sticky="w", padx=16, pady=(4, 2))
+        self.browser_switch = ctk.CTkSegmentedButton(
+            frame, values=["Chrome", "Edge"], command=self._on_browser_change)
+        self.browser_switch.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 2))
+        # Reflejar el valor actual (env/config) al abrir. .set() NO dispara el
+        # command, así que no persiste ni avisa al inicializar.
+        self.browser_switch.set("Edge" if core.get_browser() == "edge" else "Chrome")
+        ctk.CTkLabel(
+            frame,
+            text="ℹ Edge da el bonus de búsquedas de MS Rewards.\n"
+                 "Al cambiar, haz Login en el nuevo navegador.",
+            text_color="gray60", font=("", 11), justify="left",
+        ).grid(row=5, column=0, sticky="w", padx=16, pady=(0, 10))
+
         ctk.CTkButton(frame, text="🔄 Actualizar estado",
                       command=self.refresh_status).grid(
-            row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+            row=6, column=0, sticky="ew", padx=16, pady=(0, 6))
 
         # Nota: al abrir el panel se buscan actualizaciones automáticamente.
         ctk.CTkLabel(frame, text="ℹ Al abrir se buscan actualizaciones",
                      text_color="gray60", font=("", 11)).grid(
-            row=4, column=0, sticky="w", padx=16, pady=(0, 14))
+            row=7, column=0, sticky="w", padx=16, pady=(0, 14))
 
     def _build_actions_panel(self):
         frame = ctk.CTkScrollableFrame(self, label_text="Acciones")
@@ -363,6 +380,32 @@ class App(ctk.CTk):
         self.badge.configure(text=f"  {label}  ", fg_color=color)
         self.status_label.configure(text=core.format_status(last_run, task))
 
+    def _on_browser_change(self, value: str):
+        """Persiste MSR_BROWSER al cambiar el selector Chrome/Edge."""
+        browser = "edge" if value == "Edge" else "chrome"
+        # Sin cambio real (o re-selección del mismo): no hacer nada.
+        if browser == core.get_browser():
+            return
+        # No pisar una corrida en curso; devolver el switch al valor vigente.
+        if self.proc is not None:
+            messagebox.showinfo(
+                "Ocupado",
+                "Hay un proceso en marcha. Cámbialo cuando termine.")
+            actual = core.get_browser()
+            self.browser_switch.set("Edge" if actual == "edge" else "Chrome")
+            return
+        # Actualizar el entorno del propio panel: las corridas manuales de esta
+        # sesión ya usarán el nuevo navegador (build_env_with_browser lo hereda).
+        os.environ["MSR_BROWSER"] = browser
+        messagebox.showinfo(
+            "Navegador cambiado",
+            f"El bot usará {value} a partir de ahora.\n\n"
+            "Ojo: su sesión puede no existir todavía en ese navegador. "
+            "Usa «Login manual» o «Cambiar cuenta» para iniciar sesión.")
+        # Persistir en HKCU\Environment (futuras corridas + tarea programada).
+        self._launch(core.build_browser_env_command(browser),
+                     title=f"Navegador → {value}")
+
     def _auto_update(self):
         """Al arrancar: comprueba/aplica actualizaciones (git pull) una vez.
 
@@ -406,7 +449,8 @@ class App(ctk.CTk):
                 return  # canceló
             hidden = dialog.result
         self._launch(core.build_run_command(action.id, hidden=hidden),
-                     title=action.label.strip())
+                     title=action.label.strip(),
+                     env=core.build_env_with_browser())
 
     def _on_switch_account(self):
         if not messagebox.askyesno(
@@ -420,8 +464,10 @@ class App(ctk.CTk):
             return
         email, password = dialog.result
         # switch_account.py lee email (input) y contraseña (getpass) por stdin.
+        # Forzamos MSR_BROWSER para que el login abra el navegador elegido.
         self._launch(core.build_switch_command(), title="Cambiar cuenta",
-                     stdin_data=f"{email}\n{password}\n")
+                     stdin_data=f"{email}\n{password}\n",
+                     env=core.build_env_with_browser())
 
     def _on_task(self, install: bool):
         title = "Registrar tarea" if install else "Quitar tarea"
@@ -457,10 +503,13 @@ class App(ctk.CTk):
 
     # --- Ejecución de subprocesos ---------------------------------------
     def _launch(self, cmd: list[str], title: str, stdin_data: str | None = None,
-                on_done=None):
+                on_done=None, env: dict[str, str] | None = None):
         """Lanza un subproceso en segundo plano y vuelca su salida al log.
 
         `on_done` (opcional) se llama en el hilo de UI cuando el proceso termina.
+        `env` (opcional) reemplaza el entorno del subproceso; se usa para forzar
+        MSR_BROWSER en las corridas del bot sin depender del broadcast del
+        registro (que no toca el os.environ ya heredado por procesos vivos).
         """
         if self.proc is not None:
             messagebox.showinfo("Ocupado",
@@ -484,6 +533,7 @@ class App(ctk.CTk):
                 cwd=str(core.REWARDS_DIR),
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 bufsize=1,
+                env=env,
             )
         except Exception as exc:
             self._append_log(f"[ERROR] No se pudo lanzar el proceso: {exc}\n")

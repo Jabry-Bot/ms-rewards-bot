@@ -15,6 +15,8 @@ Se usa de dos formas:
         python winutil.py task-uninstall
         python winutil.py task-status            # imprime JSON
         python winutil.py shortcut <target> <lnk> <workdir>
+        python winutil.py env-set MSR_BROWSER edge   # persiste variable de usuario
+        python winutil.py env-get MSR_BROWSER        # imprime su valor ('' si no existe)
 """
 from __future__ import annotations
 
@@ -198,6 +200,17 @@ def set_env_var(name: str, value: str) -> None:
     _broadcast_env_change()
 
 
+def get_env_var(name: str) -> str:
+    r"""Lee una variable de usuario persistente (HKCU\Environment). '' si no existe."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                            winreg.KEY_QUERY_VALUE) as key:
+            value, _ = winreg.QueryValueEx(key, name)
+            return str(value)
+    except (FileNotFoundError, OSError):
+        return ""
+
+
 def delete_env_vars(names: list[str] | None = None) -> int:
     """Borra variables de usuario persistentes. Devuelve cuántas borró."""
     names = names or ENV_VARS
@@ -276,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = argv if argv is not None else sys.argv[1:]
     if not args:
-        print("uso: winutil.py task-install|task-uninstall|task-status|shortcut ...")
+        print("uso: winutil.py task-install|task-uninstall|task-status|shortcut|env-set|env-get ...")
         return 2
 
     cmd = args[0]
@@ -295,6 +308,19 @@ def main(argv: list[str] | None = None) -> int:
                 print("uso: winutil.py shortcut <target> <lnk> <workdir>")
                 return 2
             create_shortcut(args[1], args[2], args[3])
+            return 0
+        if cmd == "env-set":
+            if len(args) < 3:
+                print("uso: winutil.py env-set <NOMBRE> <valor>")
+                return 2
+            set_env_var(args[1], args[2])
+            log.info("variable de usuario %s = %s", args[1], args[2])
+            return 0
+        if cmd == "env-get":
+            if len(args) < 2:
+                print("uso: winutil.py env-get <NOMBRE>")
+                return 2
+            print(get_env_var(args[1]))
             return 0
         print(f"comando desconocido: {cmd}")
         return 2

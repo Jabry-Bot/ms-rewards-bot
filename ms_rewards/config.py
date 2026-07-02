@@ -7,8 +7,9 @@ from pathlib import Path
 
 # Navegador a usar: "chrome" o "edge". Ambos son Chromium, así que el bot
 # funciona igual; Edge además otorga el bonus de búsquedas de Microsoft Rewards.
+VALID_BROWSERS = ("chrome", "edge")
 BROWSER = os.getenv("MSR_BROWSER", "chrome").strip().lower()
-if BROWSER not in ("chrome", "edge"):
+if BROWSER not in VALID_BROWSERS:
     BROWSER = "chrome"
 
 # Canal que usa patchright/Playwright en launch_persistent_context. Es lo que
@@ -64,33 +65,22 @@ USER_DATA_DIR = os.getenv("MSR_USER_DATA_DIR", str(_DEFAULT_PROFILE))
 CDP_PORT = int(os.getenv("MSR_CDP_PORT", "9333"))
 
 # Búsquedas a realizar. El tope diario que Bing acredita depende del nivel
-# de la cuenta en Microsoft Rewards:
-#   - Nivel 1: ~10-12 búsquedas cuentan (cap ~50 pts/día en search)
-#   - Nivel 2: ~30 búsquedas desktop cuentan (cap ~90 pts/día)
+# de la cuenta en Microsoft Rewards. Tras el rediseño 2026-07 hay 3 tramos
+# (activeLevel "newLevel1/2/3") y pointsPerSearch=3:
+#   - Nivel 1 (Miembro): cap ~25 pts/día  → ~9 búsquedas cuentan
+#   - Nivel 2 (Plata):   cap ~50 pts/día  → ~17 búsquedas cuentan
+#   - Nivel 3 (Oro):     cap ~100 pts/día → ~34 búsquedas cuentan
 # Si MSR_SEARCH_COUNT está fijado por el usuario, lo respetamos. Si no,
 # el run.py detecta el nivel al arrancar y elige el valor adecuado.
 SEARCH_COUNT_BY_LEVEL = {
     1: int(os.getenv("MSR_SEARCH_COUNT_L1", "14")),
-    2: int(os.getenv("MSR_SEARCH_COUNT_L2", "32")),
+    2: int(os.getenv("MSR_SEARCH_COUNT_L2", "24")),
+    3: int(os.getenv("MSR_SEARCH_COUNT_L3", "34")),
 }
-# Valor por defecto si no se pudo detectar el nivel: usar el de Nivel 2
+# Valor por defecto si no se pudo detectar el nivel: usar el del tramo superior
 # (es preferible hacer búsquedas de más que de menos — solo "sobran" las
 # que superen el cap; no hay penalización por intentarlas).
-SEARCH_COUNT = int(os.getenv("MSR_SEARCH_COUNT", str(SEARCH_COUNT_BY_LEVEL[2])))
-
-# Búsquedas móviles (Bing tiene un cap separado para móvil):
-#   - Nivel 1: ~7-10 búsquedas móvil cuentan
-#   - Nivel 2: ~20 búsquedas móvil cuentan
-# Se ejecutan desde el mismo Chrome de escritorio emulando un Pixel 8 vía CDP.
-MOBILE_SEARCH_COUNT_BY_LEVEL = {
-    1: int(os.getenv("MSR_MOBILE_SEARCH_COUNT_L1", "10")),
-    2: int(os.getenv("MSR_MOBILE_SEARCH_COUNT_L2", "20")),
-}
-MOBILE_SEARCH_COUNT = int(
-    os.getenv("MSR_MOBILE_SEARCH_COUNT", str(MOBILE_SEARCH_COUNT_BY_LEVEL[2]))
-)
-# Habilitado por defecto. Pon MSR_MOBILE_SEARCHES=0 para desactivar.
-MOBILE_SEARCHES_ENABLED = os.getenv("MSR_MOBILE_SEARCHES", "1") == "1"
+SEARCH_COUNT = int(os.getenv("MSR_SEARCH_COUNT", str(SEARCH_COUNT_BY_LEVEL[3])))
 
 # Idioma de las queries que generamos.
 LOCALE = os.getenv("MSR_LOCALE", "es-ES")

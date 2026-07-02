@@ -38,7 +38,7 @@ import updater
 from humanize import sleep_jitter
 from launcher import launch, shutdown_chrome
 from searches import run_searches
-from searches_mobile import run_mobile_searches
+from visual_search import run_visual_search
 from daily import run_daily
 
 
@@ -157,10 +157,10 @@ def _is_automatic_run(scheduled_flag: bool) -> bool:
     return exe.startswith("pythonw")
 
 
-async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple[int, int, int, dict]:
+async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple[int, int, bool, dict]:
     log = logging.getLogger("run")
     searches_done = 0
-    mobile_searches_done = 0
+    visual_search_done = False
     daily_done = 0
     info: dict = {"level": None, "points_before": None, "points_after": None}
     async with launch(visible=visible) as context:
@@ -171,7 +171,7 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         if not await _ensure_session(context):
             runstate.mark_needs_relogin()
             log.error("sesión no disponible — abortando. Re-ejecuta setup.bat")
-            return 0, 0, 0, info
+            return 0, 0, False, info
 
         # Detectar nivel + puntos iniciales
         try:
@@ -203,7 +203,7 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
             # Ajustar cantidad según nivel detectado (si MSR_SEARCH_COUNT no
             # está fijado explícitamente por el usuario).
             count = config.SEARCH_COUNT
-            if "MSR_SEARCH_COUNT" not in os.environ and info["level"] in (1, 2):
+            if "MSR_SEARCH_COUNT" not in os.environ and info["level"] in config.SEARCH_COUNT_BY_LEVEL:
                 count = config.SEARCH_COUNT_BY_LEVEL[info["level"]]
                 log.info(
                     "nivel %d → objetivo de búsquedas: %d", info["level"], count
@@ -214,31 +214,17 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
             except Exception as exc:
                 log.exception("búsquedas fallaron: %s", exc)
 
-            # --- Búsquedas móviles ---
-            # Bing acredita aparte las búsquedas móviles (Sec-CH-UA-Mobile=?1
-            # + UA móvil + viewport pequeño + touch). Las hacemos desde el
-            # mismo Chrome emulando un Pixel 8 vía CDP, manteniendo la sesión.
-            if config.MOBILE_SEARCHES_ENABLED:
-                # Gap humano 5-15 min entre desktop y móvil para que la
-                # correlación misma-IP+misma-cuenta+UAs distintos parezca un
-                # usuario que cambió de dispositivo.
-                gap = random.uniform(300.0, 900.0)
-                log.info("gap antes de búsquedas móviles: %.0fs (~%.1f min)", gap, gap / 60)
-                await asyncio.sleep(gap)
-
-                m_count = config.MOBILE_SEARCH_COUNT
-                if "MSR_MOBILE_SEARCH_COUNT" not in os.environ and info["level"] in (1, 2):
-                    m_count = config.MOBILE_SEARCH_COUNT_BY_LEVEL[info["level"]]
-                    log.info(
-                        "nivel %d → objetivo de búsquedas móviles: %d",
-                        info["level"], m_count,
-                    )
-                log.info("=== BÚSQUEDAS MÓVIL ===")
-                try:
-                    mobile_searches_done = await run_mobile_searches(context, count=m_count)
-                    log.info("búsquedas móviles: %d", mobile_searches_done)
-                except Exception as exc:
-                    log.exception("búsquedas móviles fallaron: %s", exc)
+            # --- Búsqueda diaria por imagen (racha Visual Search) ---
+            # Una sola búsqueda por imagen al día mantiene la racha nueva de
+            # Microsoft Rewards. Se hace tras las búsquedas desktop, en el mismo
+            # navegador logueado (exige sesión + página en primer plano, como el
+            # daily set; el navegador ya cumple ambas).
+            log.info("=== BÚSQUEDA POR IMAGEN ===")
+            try:
+                visual_search_done = await run_visual_search(context)
+                log.info("búsqueda por imagen: %s", "ok" if visual_search_done else "no")
+            except Exception as exc:
+                log.exception("búsqueda por imagen falló: %s", exc)
 
         # Puntos al final (para diff)
         try:
@@ -255,7 +241,7 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
 
         await sleep_jitter(4.0, 9.0)
 
-    return searches_done, mobile_searches_done, daily_done, info
+    return searches_done, visual_search_done, daily_done, info
 
 
 async def _post_run_heal() -> list[str]:
@@ -278,6 +264,12 @@ async def _post_run_heal() -> list[str]:
     import healer  # import diferido — sólo el maintainer carga httpx/Ollama
     fixed = []
     for entry in broken:
+        # El healer repara selectores CSS; el fallo de la API interna
+        # (dashboard.api) no tiene selector que arreglar — se avisa y se salta.
+        if entry["key"].startswith("dashboard.api"):
+            log.error("la API /api/getuserinfo no respondió — revísalo a mano "
+                      "(no es un selector CSS auto-reparable)")
+            continue
         try:
             result = await healer.heal(entry["key"], entry["html"], entry["url"])
             if result:
@@ -391,7 +383,7 @@ def _main_locked(args, log) -> int:
     visible = not (_is_automatic_run(args.scheduled) or args.hidden)
 
     try:
-        searches_done, mobile_searches_done, daily_done, info = asyncio.run(
+        searches_done, visual_search_done, daily_done, info = asyncio.run(
             _run(do_daily=do_daily, do_searches=do_searches, visible=visible)
         )
     except KeyboardInterrupt:
@@ -417,9 +409,9 @@ def _main_locked(args, log) -> int:
         level=info.get("level"),
         points_before=info.get("points_before"),
         points_after=info.get("points_after"),
-        mobile_searches_done=mobile_searches_done,
+        visual_search_done=visual_search_done,
     )
-    if searches_done == 0 and mobile_searches_done == 0 and daily_done == 0:
+    if searches_done == 0 and daily_done == 0 and not visual_search_done:
         runstate.write(status="empty", searches_done=0, daily_done=0)
     else:
         runstate.mark_completed(searches_done, daily_done, status="ok")

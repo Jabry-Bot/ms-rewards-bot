@@ -43,7 +43,7 @@ def reload() -> None:
 def get(path: str, default: str | None = None) -> str:
     """
     Devuelve el selector indicado por una ruta dot-separated, p.ej.
-    'dashboard.card_link'. Lanza KeyError si no existe y no se pasa default.
+    'quiz.options'. Lanza KeyError si no existe y no se pasa default.
     """
     cur: Any = _DATA
     for part in path.split("."):

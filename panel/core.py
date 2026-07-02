@@ -11,6 +11,7 @@ La GUI (panel/app.py) y los tests (tests/test_core.py) consumen esta API.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -65,7 +66,7 @@ ACTIONS: dict[str, Action] = {
     "run_all": Action(
         "run_all", "▶  Ejecutar ahora",
         ("--force",),
-        "Daily set + búsquedas desktop + móvil (forzado, ignora 'ya completado hoy').",
+        "Daily set + búsquedas desktop + imagen (forzado, ignora 'ya completado hoy').",
         prompt_visibility=True,
     ),
     "daily": Action(
@@ -77,7 +78,7 @@ ACTIONS: dict[str, Action] = {
     "searches": Action(
         "searches", "🔍  Solo búsquedas",
         ("--searches", "--force"),
-        "Solo las búsquedas de Bing (desktop + móvil).",
+        "Solo las búsquedas de Bing (desktop + imagen).",
         prompt_visibility=True,
     ),
     "login": Action(
@@ -295,6 +296,55 @@ def parse_task_query(stdout: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+# --- Navegador (Chrome / Edge) ------------------------------------------
+# El scraper elige navegador por la variable de entorno MSR_BROWSER (chrome|edge),
+# que config.py lee para derivar CHANNEL/BROWSER_PROC/CHROME_PATH. El panel la
+# persiste (HKCU\Environment) para futuras corridas y la tarea programada, y la
+# inyecta en el entorno del subproceso inmediato. Edge otorga el bonus de
+# búsquedas de Microsoft Rewards.
+VALID_BROWSERS = ("chrome", "edge")
+DEFAULT_BROWSER = "chrome"
+
+
+def get_browser() -> str:
+    """Navegador activo del panel: MSR_BROWSER de os.environ, normalizado.
+
+    Misma normalización que config.py (chrome|edge, chrome por defecto). Es el
+    valor que heredó el proceso del panel; refleja lo persistido en la sesión.
+    """
+    val = os.environ.get("MSR_BROWSER", DEFAULT_BROWSER).strip().lower()
+    return val if val in VALID_BROWSERS else DEFAULT_BROWSER
+
+
+def build_env_set_command(name: str, value: str) -> list[str]:
+    """Comando que persiste una variable de usuario vía winutil (Python puro).
+
+    El panel congelado no puede importar winutil; lo invoca con el venv-python,
+    igual que build_task_command. Persiste en HKCU\\Environment (setx-like).
+    """
+    return [str(VENV_PY), str(WINUTIL_PY), "env-set", name, value]
+
+
+def build_browser_env_command(browser: str) -> list[str]:
+    """Comando para persistir MSR_BROWSER. Valida contra VALID_BROWSERS."""
+    browser = (browser or "").strip().lower()
+    if browser not in VALID_BROWSERS:
+        raise ValueError(f"navegador desconocido: {browser!r}")
+    return build_env_set_command("MSR_BROWSER", browser)
+
+
+def build_env_with_browser(browser: str | None = None) -> dict[str, str]:
+    """Entorno para el subprocess.Popen inmediato con MSR_BROWSER forzado.
+
+    Persistir en el registro hace broadcast pero NO cambia el os.environ ya
+    heredado por procesos vivos; pasamos MSR_BROWSER explícito en el env del
+    Popen para que la corrida lanzada ahora use el navegador elegido.
+    """
+    env = dict(os.environ)
+    env["MSR_BROWSER"] = get_browser() if browser is None else browser
+    return env
+
+
 def read_last_run() -> dict[str, Any]:
     """Lee state/last_run.json. {} si no existe o está corrupto."""
     if not LAST_RUN_PATH.exists():
@@ -354,13 +404,13 @@ def format_status(last_run: dict[str, Any], task: dict[str, Any] | None = None) 
                 lines.append(f"Puntos: {pa}")
         if last_run.get("level") is not None:
             lines.append(f"Nivel: {last_run['level']}")
-        partes = []
         if last_run.get("searches_done") is not None:
-            partes.append(f"{last_run['searches_done']} desktop")
-        if last_run.get("mobile_searches_done") is not None:
-            partes.append(f"{last_run['mobile_searches_done']} móvil")
-        if partes:
-            lines.append("Búsquedas: " + " · ".join(partes))
+            lines.append(f"Búsquedas: {last_run['searches_done']}")
+        if last_run.get("visual_search_done") is not None:
+            lines.append(
+                "Búsqueda por imagen: "
+                + ("sí" if last_run.get("visual_search_done") else "no")
+            )
         if last_run.get("daily_done") is not None:
             lines.append(f"Daily cards: {last_run['daily_done']}")
         if last_run.get("updated_at"):

@@ -1,11 +1,12 @@
 """
 Auto-reparación de selectores con LLM local (Ollama).
 
-Se activa SOLO en la máquina del maintainer (MSR_MAINTAINER=1). Cuando el
-bot detecta selectores rotos durante la ejecución (lista de cards vacía en
-un dashboard que sí cargó, quiz sin opciones reconocibles, etc.), llama a
-heal() pasándole la clave del selector que falló y el HTML de la página
-donde falló.
+Se activa SOLO en la máquina del maintainer (MSR_MAINTAINER=1). Tras el
+rediseño 2026-07 el daily set del dashboard se lee de la API interna
+(dashboard_api), así que ya no hay selectores de dashboard que reparar; el
+healer queda para los selectores del quiz de bing.com (quiz sin opciones
+reconocibles). heal() recibe la clave del selector que falló y el HTML de la
+página donde falló.
 
 heal() pide a Ollama un selector CSS candidato, lo valida contra el HTML
 ofreciéndole una prueba offline (Playwright cargado con set_content),
@@ -36,20 +37,11 @@ _SELECTORS_FILE = _REPO_ROOT / "selectors.json"
 # Pista mínima por clave: qué buscamos exactamente. El healer la inyecta
 # en el prompt para que el LLM sepa qué descripciones de elementos son
 # matches válidos.
+# Nota: desde el rediseño 2026-07 el daily set del dashboard se lee de la API
+# interna (dashboard_api), no por CSS, así que ya no hay selectores de dashboard
+# ni de punch card que reparar. El healer solo cubre los selectores del quiz de
+# bing.com (que sí siguen siendo CSS y podrían cambiar).
 _HINTS: dict[str, str] = {
-    "dashboard.card_container": (
-        "Cada elemento contenedor de una 'card' del dashboard de Microsoft "
-        "Rewards. Suele haber daily set, more activities y punch cards. "
-        "Cada card contiene un <a> que abre la actividad."
-    ),
-    "dashboard.card_link": (
-        "El <a> dentro de cada card del dashboard que abre la actividad "
-        "(daily set, more activities, punch card)."
-    ),
-    "dashboard.complete_badge": (
-        "El icono que indica que una card ya está completada (típicamente "
-        "un check verde / circulo con tick)."
-    ),
     "quiz.options": (
         "Los botones/elementos de opción de respuesta en un quiz multi-"
         "respuesta de Microsoft Rewards (no this-or-that ni poll)."
@@ -59,11 +51,6 @@ _HINTS: dict[str, str] = {
         "Rewards (dos imágenes/cards lado a lado para elegir una)."
     ),
     "quiz.poll": "Las opciones de un poll/encuesta en Microsoft Rewards.",
-    "punch_card.piece": (
-        "Cada pieza/link clickable dentro del hub de una punch card semanal "
-        "que abre una sub-actividad. Las completadas suelen tener clase "
-        "que incluye 'complete'."
-    ),
 }
 
 

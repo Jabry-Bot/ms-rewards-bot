@@ -1,42 +1,48 @@
 """
-Resuelve el Daily Set y promociones del dashboard de Microsoft Rewards.
+Resuelve el Daily Set y promociones de Microsoft Rewards — modo API-driven.
 
-Estrategia:
-  - Ir a https://rewards.bing.com/
-  - Buscar cards no completadas (las tienen un check; las pendientes no)
-  - Para cada una, click -> se abre una pestaña nueva
-  - Dentro de esa pestaña, según el tipo:
-      * Artículo / "ver tres anuncios": esperar y scrollear
-      * Quiz de selección múltiple: pulsar todas las opciones hasta que dé OK
-      * Poll: pulsar una opción aleatoria
-      * "This or That": pulsar una opción al azar varias veces
-  - Cerrar pestaña y pasar a la siguiente
+Contexto (rediseño 2026-07): el dashboard pasó a Next.js/Tailwind y las cards ya
+no tienen selectores CSS estables (`mee-rewards-*` desaparecieron). En vez de
+scrapear el DOM, ahora leemos las actividades pendientes de la API interna
+(dashboard_api.fetch_dashboard → pending_activities) y completamos cada una
+VISITANDO su `destinationUrl`:
+
+  - actividad de búsqueda (q=...): basta cargar la SERP; se acredita sola.
+  - quiz / poll / this-or-that: la página de bing.com sí conserva sus selectores
+    (#rqAnswerOption0, .rqOptionWrap, ...), así que _handle_activity_tab detecta
+    el tipo y _solve_quiz_like lo resuelve como antes.
+
+Los helpers de resolución de actividad (_handle_activity_tab, _solve_quiz_like) y
+de reclamar bonus (_click_claim_buttons) operan sobre páginas bing.com, no sobre
+el dashboard rediseñado, por lo que siguen siendo válidos.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 
 from patchright.async_api import BrowserContext, Page
 
 import config
+import dashboard_api
 import selectors
 from humanize import bezier_mouse_move, human_read, human_scroll, safe_goto, sleep_jitter
 
 log = logging.getLogger("daily")
 
-REWARDS_URL = "https://rewards.microsoft.com/"
+# Dashboard canónico tras el rediseño (rewards.microsoft.com redirige aquí).
+REWARDS_URL = "https://rewards.bing.com/dashboard"
 
-# Estado de fallos de selectores recogidos durante esta ejecución. El run.py
-# lo lee al final y, si el modo maintainer está activo, dispara healer.heal.
-# Lista de dicts: {"key": "dashboard.card_link", "url": "...", "html": "..."}
+# Estado de fallos recogidos durante esta ejecución. run.py lo lee al final y,
+# si el modo maintainer está activo, dispara healer.heal. Con el modelo
+# API-driven la única "rotura" posible del daily set es que la API no responda.
+# Lista de dicts: {"key": "dashboard.api", "url": "...", "html": "..."}
 broken_selectors: list[dict] = []
 
 
 def _record_broken(key: str, page_url: str, html: str) -> None:
     broken_selectors.append({"key": key, "url": page_url, "html": html})
-    log.warning("selector roto detectado: %s en %s", key, page_url)
+    log.warning("fallo detectado: %s en %s", key, page_url)
 
 
 async def _click_claim_buttons(page: Page) -> int:
@@ -48,7 +54,8 @@ async def _click_claim_buttons(page: Page) -> int:
     Estrategia doble (robusta a cambios de clase CSS):
       1) selector CSS desde selectors.json (data-bi-name*='claim', etc.)
       2) fallback por texto del elemento (a/button cuyo innerText case-
-         insensitive empiece por una keyword localizada).
+         insensitive empiece por una keyword localizada). El fallback por texto
+         sigue funcionando en el dashboard rediseñado, donde no hay CSS estable.
     """
     css_sel = selectors.get("claim.anywhere", "")
     kw_es = selectors.get("claim.text_keywords_es", "")
@@ -149,39 +156,6 @@ async def _click_claim_buttons(page: Page) -> int:
     return clicked
 
 
-async def _list_pending_cards(page: Page) -> list[dict]:
-    """
-    Inspecciona el DOM del dashboard y devuelve metadata de las cards aún
-    no completadas: { href, title, index }.
-    """
-    # Selectores parametrizados desde selectors.json para que el healer pueda
-    # actualizarlos sin tocar este código.
-    container_sel = selectors.get("dashboard.card_container")
-    badge_sel = selectors.get("dashboard.complete_badge")
-    js = """
-([containerSel, badgeSel]) => {
-  const out = [];
-  const cards = document.querySelectorAll(containerSel);
-  cards.forEach((card, i) => {
-    const completed = card.querySelector(badgeSel);
-    const isPunch = card.tagName.toLowerCase() === 'mee-rewards-punch-card';
-    if (completed && !isPunch) return;
-    const link = card.querySelector('a[href], a[data-bi-id]');
-    if (!link) return;
-    const href = link.getAttribute('href') || '';
-    const title = (card.innerText || '').slice(0, 80).replace(/\\s+/g, ' ').trim();
-    out.push({ href, title, index: i, isPunch });
-  });
-  return out;
-}
-"""
-    try:
-        return await page.evaluate(js, [container_sel, badge_sel])
-    except Exception as exc:
-        log.warning("listado de cards falló: %s", exc)
-        return []
-
-
 async def _solve_quiz_like(page: Page) -> None:
     """
     Resuelve cards interactivas (quiz/poll/this-or-that).
@@ -264,142 +238,14 @@ async def _solve_quiz_like(page: Page) -> None:
     log.info("quiz/poll terminado tras %d rondas", rounds)
 
 
-async def _count_punch_pieces(page: Page) -> int:
-    """Devuelve cuántas sub-piezas pendientes hay en la pestaña actual."""
-    try:
-        elements = await page.query_selector_all(selectors.get("punch_card.piece"))
-    except Exception:
-        return 0
-    live = 0
-    for el in elements:
-        try:
-            if not await el.is_visible():
-                continue
-            # Excluir las que ya están marcadas como completas
-            cls = (await el.get_attribute("class")) or ""
-            if "complete" in cls.lower() or "done" in cls.lower():
-                continue
-            # En algunas versiones, el ancestro tiene la clase 'complete'
-            parent_complete = await el.evaluate(
-                "(el) => !!el.closest('.complete, [class*=\"completed\"]')"
-            )
-            if parent_complete:
-                continue
-            live += 1
-        except Exception:
-            continue
-    return live
-
-
-async def _handle_punch_card_hub(hub: Page, context: BrowserContext) -> int:
-    """
-    El hub muestra todas las "piezas" del puzzle semanal. Cada pieza es un
-    link que abre su propia pestaña con una sub-actividad (artículo o quiz).
-    Recorremos las que quedan pendientes en bucle hasta agotarlas.
-    """
-    pieces_done = 0
-    safety = 0
-    while safety < 12:  # máx 12 piezas (las punch cards llegan hasta ~10)
-        safety += 1
-
-        # Recargar para que se vea el estado real tras la pieza anterior
-        if pieces_done > 0:
-            try:
-                await hub.reload(wait_until="domcontentloaded", timeout=15_000)
-            except Exception:
-                pass
-            await sleep_jitter(2.0, 4.0)
-
-        pending = await _count_punch_pieces(hub)
-        log.info("punch card: %d piezas pendientes", pending)
-        if pending == 0:
-            break
-
-        # Localizar el primer link pendiente y clickarlo
-        try:
-            pieces = await hub.query_selector_all(selectors.get("punch_card.piece"))
-        except Exception:
-            pieces = []
-
-        target = None
-        for el in pieces:
-            try:
-                if not await el.is_visible():
-                    continue
-                cls = (await el.get_attribute("class")) or ""
-                if "complete" in cls.lower():
-                    continue
-                parent_complete = await el.evaluate(
-                    "(el) => !!el.closest('.complete, [class*=\"completed\"]')"
-                )
-                if parent_complete:
-                    continue
-                target = el
-                break
-            except Exception:
-                continue
-
-        if target is None:
-            log.info("no se encontró pieza clickable; saliendo del hub")
-            break
-
-        # Click → abre nueva pestaña con la sub-actividad
-        sub_page: Page | None = None
-        try:
-            box = await target.bounding_box()
-            if box:
-                vp = hub.viewport_size or {"width": 1280, "height": 720}
-                await bezier_mouse_move(
-                    hub,
-                    random.randint(80, vp["width"] - 80),
-                    random.randint(80, vp["height"] - 80),
-                    int(box["x"] + box["width"] / 2),
-                    int(box["y"] + box["height"] / 2),
-                    steps=random.randint(15, 25),
-                )
-            async with context.expect_page(timeout=10_000) as sub_info:
-                await target.click()
-            sub_page = await sub_info.value
-        except Exception as exc:
-            log.warning("no se abrió la sub-pieza: %s", exc)
-            # Algunas piezas navegan en la misma pestaña — intentamos resolver
-            # directamente sobre el hub.
-            try:
-                await _handle_activity_tab(hub)
-                pieces_done += 1
-            except Exception:
-                pass
-            await sleep_jitter(*config.DELAYS["between_cards"])
-            continue
-
-        try:
-            await _handle_activity_tab(sub_page)
-            pieces_done += 1
-        except Exception as exc:
-            log.warning("pieza falló: %s", exc)
-        finally:
-            try:
-                await sub_page.close()
-            except Exception:
-                pass
-
-        await sleep_jitter(*config.DELAYS["between_cards"])
-
-    # Tras terminar las piezas, algunas punch cards tienen un botón final
-    # de "Reclamar / Claim" para la recompensa total. Lo buscamos en el hub.
-    try:
-        claimed = await _click_claim_buttons(hub)
-        if claimed:
-            log.info("punch card: %d recompensa(s) finales reclamadas", claimed)
-    except Exception as exc:
-        log.debug("no se pudo reclamar punch card final: %s", exc)
-
-    log.info("punch card terminada: %d piezas completadas", pieces_done)
-    return pieces_done
-
-
 async def _handle_activity_tab(page: Page) -> None:
-    """Resuelve una pestaña que contiene UNA actividad (no un hub)."""
+    """Resuelve una pestaña que contiene UNA actividad (búsqueda / quiz / lectura)."""
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    except Exception:
+        pass
+    await sleep_jitter(2.0, 4.5)
+
     is_interactive = False
     try:
         if await page.query_selector(selectors.get("quiz.interactive_indicators")):
@@ -417,175 +263,187 @@ async def _handle_activity_tab(page: Page) -> None:
         await sleep_jitter(2.0, 4.0)
 
 
-async def _handle_card_tab(page: Page, context: BrowserContext) -> None:
+# Localiza en el dashboard el <a> cuyo href es el destino de la actividad. El
+# href del daily set contiene el offerId (filtro BTDSUOID), así que es un ancla
+# fiable; para more/punch casamos por href exacto o por el código form=.
+_TAG_ANCHOR_JS = r"""
+([url, offerId]) => {
+  // Parámetro de búsqueda q (case-insensitive) — discriminante estable entre
+  // cards, robusto a la normalización de comillas/espacios del navegador.
+  const getQ = (href) => {
+    try {
+      const sp = new URL(href, location.origin).searchParams;
+      for (const [k, v] of sp) { if (k.toLowerCase() === 'q') return v; }
+    } catch (e) {}
+    return null;
+  };
+  const targetQ = getQ(url);
+  const anchors = [...document.querySelectorAll('a[href]')];
+  let m = null;
+  // 1) por offerId en el href (daily set con BTDSUOID)
+  if (offerId) m = anchors.find(a => a.href.includes(offerId));
+  // 2) por el parámetro de búsqueda q (Tetons y otras sin offerId en el href)
+  if (!m && targetQ) m = anchors.find(a => getQ(a.href) === targetQ);
+  // 3) por href normalizado exacto
+  if (!m) { try { const nu = new URL(url, location.origin).href; m = anchors.find(a => a.href === nu); } catch (e) {} }
+  if (!m) return false;
+  document.querySelectorAll('[data-msr-act]').forEach(e => e.removeAttribute('data-msr-act'));
+  m.setAttribute('data-msr-act', '1');
+  m.scrollIntoView({ block: 'center' });
+  return true;
+}
+"""
+
+
+async def _open_activity_via_card(page: Page, context: BrowserContext, activity) -> Page | None:
     """
-    Detecta si la pestaña abierta es un hub de punch card o una actividad
-    suelta, y la resuelve.
+    Localiza el <a> de la actividad en el dashboard y lo CLICA con un clic
+    confiado de Playwright. Clave del rediseño: Bing solo acredita el offer
+    cuando la navegación nace de ese clic real desde el dashboard — un goto
+    directo al destinationUrl dispara el beacon reportActivity pero NO acredita.
+    Devuelve la pestaña abierta, o None si no encontró la card / no abrió tab.
     """
+    # Reintentos: la SPA puede tardar en pintar el <a> de la card.
+    tagged = False
+    for _ in range(3):
+        try:
+            tagged = await page.evaluate(
+                _TAG_ANCHOR_JS, [activity.destination_url, activity.offer_id])
+        except Exception as exc:
+            log.debug("búsqueda de card falló: %s", exc)
+            tagged = False
+        if tagged:
+            break
+        await sleep_jitter(1.0, 1.5)
+    if not tagged:
+        return None
     try:
-        await page.wait_for_load_state("domcontentloaded", timeout=15_000)
-    except Exception:
-        pass
-    await sleep_jitter(2.0, 4.5)
+        async with context.expect_page(timeout=8000) as info:
+            await page.click('[data-msr-act="1"]', timeout=8000)
+        return await info.value
+    except Exception as exc:
+        log.debug("clic en card no abrió pestaña: %s", exc)
+        return None
 
-    # ¿Hub de punch card? Si vemos 2+ sub-piezas pendientes, lo tratamos así.
-    pieces = await _count_punch_pieces(page)
-    if pieces >= 2:
-        log.info("hub de punch card detectado (%d piezas)", pieces)
-        await _handle_punch_card_hub(page, context)
-        return
 
-    await _handle_activity_tab(page)
+async def _wait_for_activity_anchors(page: Page, timeout: float = 15.0) -> bool:
+    """
+    Espera a que la SPA del dashboard pinte los <a target=_blank> de las cards
+    del daily set (aparecen tras la hidratación + fetch de la API). Sondea el
+    DOM en intervalos cortos. Devuelve True si aparecieron.
+    """
+    probe = ("() => document.querySelectorAll("
+             "\"a[href*='rnoreward'], a[href*='DailySet'], a[href*='dsetqu'], a[href*='form=ML']\""
+             ").length")
+    attempts = max(1, int(timeout))
+    for _ in range(attempts):
+        try:
+            if await page.evaluate(probe):
+                return True
+        except Exception:
+            pass
+        await sleep_jitter(0.8, 1.2)
+    return False
 
 
 async def run_daily(context: BrowserContext) -> int:
-    """Ejecuta todas las cards pendientes del dashboard. Devuelve cuántas hizo."""
-    pages = context.pages
-    dashboard = pages[0] if pages else await context.new_page()
+    """
+    Ejecuta las actividades pendientes del dashboard leídas de la API interna
+    (daily set + more promotions + punch cards). Cada actividad `urlreward` se
+    completa visitando su `destinationUrl`. Devuelve cuántas se ejecutaron.
+    """
+    page = context.pages[0] if context.pages else await context.new_page()
 
     # Primera navegación tras abrir Chrome → reintentos generosos: el resolver
     # de red puede tardar un instante en estar listo (ERR_NAME_NOT_RESOLVED).
-    if not await safe_goto(dashboard, REWARDS_URL, attempts=6, timeout=25_000):
+    if not await safe_goto(page, REWARDS_URL, attempts=6, timeout=25_000):
         log.error("no se pudo cargar el dashboard tras varios intentos")
         return 0
     await sleep_jitter(3.0, 6.0)
-    await human_scroll(dashboard, random.randint(200, 500))
-    await sleep_jitter(1.0, 2.5)
 
-    cards = await _list_pending_cards(dashboard)
-    log.info("cards pendientes: %d", len(cards))
-    if not cards:
-        # Si el dashboard cargó OK (URL contiene rewards) pero no hay cards,
-        # probablemente los selectores del container están rotos. Guardamos
-        # el HTML para que el healer lo procese tras la ejecución.
+    dashboard = await dashboard_api.fetch_dashboard(context, navigate=False)
+    if not dashboard:
+        # La API no respondió pese a haber sesión activa: posible cambio de la
+        # API o rediseño más profundo. Guardamos el HTML para diagnóstico.
         try:
-            url_ok = "rewards." in dashboard.url
-            html = await dashboard.content() if url_ok else ""
-            if url_ok and len(html) > 5000:
-                _record_broken("dashboard.card_container", dashboard.url, html)
+            html = await page.content()
+        except Exception:
+            html = ""
+        _record_broken("dashboard.api", page.url, html)
+        log.error("/api/getuserinfo no devolvió datos; nada que hacer en daily set")
+        return 0
+
+    activities = dashboard_api.pending_activities(dashboard)
+    log.info("actividades pendientes (API): %d", len(activities))
+    if not activities:
+        # Nada pendiente; intenta reclamar cualquier bonus/streak visible.
+        try:
+            await _click_claim_buttons(page)
         except Exception:
             pass
         return 0
 
+    # Esperar a que la SPA pinte los <a> de las cards antes de clicarlas.
+    await _wait_for_activity_anchors(page)
+
     done = 0
-    simple_click_done = 0
-    for c in cards:
-        log.info("→ abriendo card: %s", (c.get("title") or "")[:60])
-
-        # Hay tres tipos de cards en MS Rewards:
-        #   A) Card que abre PESTAÑA NUEVA con quiz/poll/artículo → flujo normal.
-        #   B) Card que NAVEGA EN LA MISMA PESTAÑA al destino → poco frecuente.
-        #   C) Card de "SIMPLE CLICK ACREDITA": el click acredita puntos
-        #      directamente sin abrir pestaña ni navegar (p.ej. "Reclama X
-        #      puntos por activar la barra", "Comparte con un amigo", banners
-        #      promo). Antes las contábamos como fallo porque expect_page daba
-        #      timeout — pero los puntos sí se acreditaban.
-        #
-        # Distinguimos comparando la cantidad de pestañas / la URL antes y
-        # después del click.
-        _CLICK_JS = """([idx, containerSel]) => {
-            const cards = document.querySelectorAll(containerSel);
-            const card = cards[idx];
-            if (!card) return false;
-            const link = card.querySelector('a[href], a[data-bi-id]');
-            if (!link) return false;
-            link.scrollIntoView({block: 'center'});
-            link.click();
-            return true;
-        }"""
-        container_sel = selectors.get("dashboard.card_container")
-        pages_before = len(context.pages)
-        url_before = dashboard.url
-
-        # expect_page con timeout corto: si tras 3.5s no se abrió pestaña,
-        # asumimos card tipo B/C y seguimos. Si se abre, la procesamos.
-        new_page: Page | None = None
+    for act in activities:
+        log.info("→ %s [%s] (%d pts)", act.title[:60], act.source, act.points_max)
+        sub: Page | None = None
+        via = "card"
         try:
-            async with context.expect_page(timeout=3_500) as new_page_info:
-                clicked = await dashboard.evaluate(_CLICK_JS, [c["index"], container_sel])
-                if not clicked:
-                    raise RuntimeError(f"card idx={c['index']} sin link clickable")
-            new_page = await new_page_info.value
-        except Exception as exc:
-            msg = str(exc)
-            if "sin link clickable" in msg:
-                # Card no tenía link real (raro tras filtros). Saltamos.
-                log.debug("card sin link clickable, saltando: %s", c.get("title", "")[:40])
-                continue
-            # Click hecho pero ninguna pestaña nueva. Determinamos qué pasó:
-            await sleep_jitter(0.8, 1.6)
-            pages_after = len(context.pages)
-            url_after = dashboard.url
-            if pages_after > pages_before:
-                # Race: la pestaña sí se abrió pero el expect_page expiró
-                # justo antes. Recogerla manualmente.
-                new_page = context.pages[-1]
-            elif url_after != url_before:
-                # Tipo B: la card navegó en la misma pestaña.
-                log.info("card navegó en la misma pestaña; procesando como actividad")
-                try:
-                    await _handle_card_tab(dashboard, context)
-                    done += 1
-                except Exception as exc2:
-                    log.warning("card en misma pestaña falló: %s", exc2)
-                # Volver al dashboard
-                try:
-                    await safe_goto(dashboard, REWARDS_URL, attempts=3, timeout=20_000)
-                    await sleep_jitter(2.0, 4.0)
-                except Exception:
-                    pass
-                continue
-            else:
-                # Tipo C: simple click — los puntos se acreditan sin más.
-                # Lo contamos como completada (era el bug: antes la perdíamos).
-                log.info("card de simple-click: puntos acreditados sin pestaña")
-                simple_click_done += 1
-                # Pequeña pausa entre cards para no abrumar al dashboard
-                await sleep_jitter(*config.DELAYS["between_cards"])
-                continue
-
-        if new_page is None:
-            continue
-
-        try:
-            await _handle_card_tab(new_page, context)
-            done += 1
-        except Exception as exc:
-            log.warning("card falló: %s", exc)
-        finally:
+            # Vía principal: clic real en la card del dashboard — la única que
+            # acredita tras el rediseño (un goto directo no acredita el offer).
+            sub = await _open_activity_via_card(page, context, act)
+            if sub is None:
+                # Fallback best-effort: goto directo. Dispara el beacon; puede
+                # no acreditar, pero es mejor que saltar la actividad.
+                via = "goto"
+                sub = await context.new_page()
+                if not await safe_goto(sub, act.destination_url, attempts=3, timeout=25_000):
+                    log.warning("no se pudo abrir la actividad: %s", act.title[:40])
+                    continue
+            # La actividad debe quedar en PRIMER PLANO mientras se resuelve.
             try:
-                await new_page.close()
+                await sub.bring_to_front()
             except Exception:
                 pass
-
-        # Pausa entre cards
+            await _handle_activity_tab(sub)
+            done += 1
+            log.info("   ejecutada vía %s", via)
+        except Exception as exc:
+            log.warning("actividad falló (%s): %s", act.title[:40], exc)
+        finally:
+            if sub is not None:
+                try:
+                    await sub.close()
+                except Exception:
+                    pass
+            # Volver al dashboard para clicar la siguiente card.
+            try:
+                await page.bring_to_front()
+            except Exception:
+                pass
+        # Pausa humana entre actividades.
         await sleep_jitter(*config.DELAYS["between_cards"])
 
-    # Volver al dashboard y refrescar para que se actualicen los checks
+    # Volver al dashboard y reclamar bonus de streak/daily que hayan aparecido.
     try:
-        await dashboard.reload(wait_until="domcontentloaded", timeout=15_000)
-        await sleep_jitter(3.0, 6.0)
+        await safe_goto(page, REWARDS_URL, attempts=3, timeout=20_000)
+        await sleep_jitter(2.0, 4.0)
+        claimed = await _click_claim_buttons(page)
+        if claimed:
+            log.info("reclamadas %d fichas de bonus", claimed)
+    except Exception as exc:
+        log.debug("reclamación en dashboard falló: %s", exc)
+
+    # Confirmar cuántas quedan pendientes tras la corrida (re-consultando la API).
+    try:
+        after = await dashboard_api.fetch_dashboard(context, navigate=False)
+        remaining = len(dashboard_api.pending_activities(after)) if after else -1
+        log.info("daily set: %d actividades ejecutadas; pendientes restantes: %s",
+                 done, remaining if remaining >= 0 else "?")
     except Exception:
         pass
 
-    # Reclamar cualquier ficha pendiente que haya aparecido tras completar
-    # las cards: bonus de daily set, streak, punch card final, etc.
-    try:
-        claimed = await _click_claim_buttons(dashboard)
-        if claimed:
-            log.info("reclamadas %d fichas en el dashboard", claimed)
-            # Refrescar para confirmar
-            await dashboard.reload(wait_until="domcontentloaded", timeout=15_000)
-            await sleep_jitter(2.0, 4.0)
-    except Exception as exc:
-        log.warning("reclamación en dashboard falló: %s", exc)
-
-    total = done + simple_click_done
-    if simple_click_done:
-        log.info(
-            "daily set: %d cards completadas (%d con sub-actividad + %d de simple-click)",
-            total, done, simple_click_done,
-        )
-    else:
-        log.info("daily set: %d cards completadas", total)
-    return total
+    return done
