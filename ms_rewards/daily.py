@@ -32,6 +32,9 @@ log = logging.getLogger("daily")
 
 # Dashboard canónico tras el rediseño (rewards.microsoft.com redirige aquí).
 REWARDS_URL = "https://rewards.bing.com/dashboard"
+# Pestaña "Ganar": aquí viven las more activities / punch cards (no en el
+# dashboard principal), como <a target=_blank> clicables igual que el daily set.
+EARN_URL = "https://rewards.bing.com/earn"
 
 # Estado de fallos recogidos durante esta ejecución. run.py lo lee al final y,
 # si el modo maintainer está activo, dispara healer.heal. Con el modelo
@@ -346,6 +349,53 @@ async def _wait_for_activity_anchors(page: Page, timeout: float = 15.0) -> bool:
     return False
 
 
+async def _process_activities(page: Page, context: BrowserContext, acts: list) -> int:
+    """
+    Ejecuta una lista de actividades clicando su card en `page` (la única vía
+    que acredita), con fallback a goto directo si no se encuentra. Devuelve
+    cuántas se ejecutaron. `page` debe ser la superficie donde viven esas cards:
+    el dashboard para el daily set, /earn para las more/punch.
+    """
+    done = 0
+    for act in acts:
+        log.info("→ %s [%s] (%d pts)", act.title[:60], act.source, act.points_max)
+        sub: Page | None = None
+        via = "card"
+        try:
+            # Vía principal: clic real en la card (la única que acredita).
+            sub = await _open_activity_via_card(page, context, act)
+            if sub is None:
+                # Fallback best-effort: goto directo (dispara el beacon; puede
+                # no acreditar, pero es mejor que saltar la actividad).
+                via = "goto"
+                sub = await context.new_page()
+                if not await safe_goto(sub, act.destination_url, attempts=3, timeout=25_000):
+                    log.warning("no se pudo abrir la actividad: %s", act.title[:40])
+                    continue
+            try:
+                await sub.bring_to_front()
+            except Exception:
+                pass
+            await _handle_activity_tab(sub)
+            done += 1
+            log.info("   ejecutada vía %s", via)
+        except Exception as exc:
+            log.warning("actividad falló (%s): %s", act.title[:40], exc)
+        finally:
+            if sub is not None:
+                try:
+                    await sub.close()
+                except Exception:
+                    pass
+            # Volver a la superficie de cards para clicar la siguiente.
+            try:
+                await page.bring_to_front()
+            except Exception:
+                pass
+        await sleep_jitter(*config.DELAYS["between_cards"])
+    return done
+
+
 async def run_daily(context: BrowserContext) -> int:
     """
     Ejecuta las actividades pendientes del dashboard leídas de la API interna
@@ -383,49 +433,26 @@ async def run_daily(context: BrowserContext) -> int:
             pass
         return 0
 
-    # Esperar a que la SPA pinte los <a> de las cards antes de clicarlas.
-    await _wait_for_activity_anchors(page)
+    # Separar el daily set (cards en el dashboard) de las more/punch (viven bajo
+    # la pestaña "Ganar" = /earn).
+    daily_acts = [a for a in activities if a.source == "daily"]
+    other_acts = [a for a in activities if a.source != "daily"]
 
     done = 0
-    for act in activities:
-        log.info("→ %s [%s] (%d pts)", act.title[:60], act.source, act.points_max)
-        sub: Page | None = None
-        via = "card"
-        try:
-            # Vía principal: clic real en la card del dashboard — la única que
-            # acredita tras el rediseño (un goto directo no acredita el offer).
-            sub = await _open_activity_via_card(page, context, act)
-            if sub is None:
-                # Fallback best-effort: goto directo. Dispara el beacon; puede
-                # no acreditar, pero es mejor que saltar la actividad.
-                via = "goto"
-                sub = await context.new_page()
-                if not await safe_goto(sub, act.destination_url, attempts=3, timeout=25_000):
-                    log.warning("no se pudo abrir la actividad: %s", act.title[:40])
-                    continue
-            # La actividad debe quedar en PRIMER PLANO mientras se resuelve.
-            try:
-                await sub.bring_to_front()
-            except Exception:
-                pass
-            await _handle_activity_tab(sub)
-            done += 1
-            log.info("   ejecutada vía %s", via)
-        except Exception as exc:
-            log.warning("actividad falló (%s): %s", act.title[:40], exc)
-        finally:
-            if sub is not None:
-                try:
-                    await sub.close()
-                except Exception:
-                    pass
-            # Volver al dashboard para clicar la siguiente card.
-            try:
-                await page.bring_to_front()
-            except Exception:
-                pass
-        # Pausa humana entre actividades.
-        await sleep_jitter(*config.DELAYS["between_cards"])
+    # 1) Daily set: cards del dashboard actual.
+    await _wait_for_activity_anchors(page)
+    done += await _process_activities(page, context, daily_acts)
+
+    # 2) More activities / punch cards: sus cards no están en el dashboard
+    #    principal sino en /earn. Navegamos allí y las clicamos.
+    if other_acts:
+        log.info("→ %d actividad(es) extra en la pestaña Ganar (/earn)", len(other_acts))
+        if await safe_goto(page, EARN_URL, attempts=3, timeout=25_000):
+            await sleep_jitter(3.0, 6.0)
+            await _wait_for_activity_anchors(page)
+            done += await _process_activities(page, context, other_acts)
+        else:
+            log.warning("no se pudo cargar /earn; se omiten las actividades extra")
 
     # Volver al dashboard y reclamar bonus de streak/daily que hayan aparecido.
     try:
