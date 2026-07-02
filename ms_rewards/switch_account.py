@@ -147,7 +147,14 @@ def main() -> int:
     if not email:
         print("  ERROR: email vacío. Cancelado.")
         return 1
-    password = getpass.getpass("  Contraseña (no se mostrará): ")
+    # Si no hay TTY (el panel lanza este script con stdin canalizado), getpass
+    # en Windows leería de la consola vía msvcrt y se colgaría indefinidamente;
+    # en ese caso leemos la contraseña del stdin igual que el email.
+    if sys.stdin is not None and sys.stdin.isatty():
+        password = getpass.getpass("  Contraseña (no se mostrará): ")
+    else:
+        print("  Contraseña (no se mostrará): ", end="", flush=True)
+        password = sys.stdin.readline().rstrip("\n")
     if not password:
         print("  ERROR: contraseña vacía. Cancelado.")
         return 1
