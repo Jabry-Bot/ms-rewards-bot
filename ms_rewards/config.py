@@ -82,6 +82,11 @@ SEARCH_COUNT_BY_LEVEL = {
 # que superen el cap; no hay penalización por intentarlas).
 SEARCH_COUNT = int(os.getenv("MSR_SEARCH_COUNT", str(SEARCH_COUNT_BY_LEVEL[3])))
 
+# Racha "Usa Edge N minutos al día": el bot navega en Edge hasta completar los
+# minutos que falten (solo con MSR_BROWSER=edge; lo mide el propio Edge). Tope
+# de minutos por corrida para no eternizarla.
+EDGE_USAGE_MAX_MIN = int(os.getenv("MSR_EDGE_USAGE_MAX_MIN", "35"))
+
 # Idioma de las queries que generamos.
 LOCALE = os.getenv("MSR_LOCALE", "es-ES")
 

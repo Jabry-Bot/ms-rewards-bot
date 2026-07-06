@@ -270,7 +270,7 @@ async def _handle_activity_tab(page: Page) -> None:
 # href del daily set contiene el offerId (filtro BTDSUOID), así que es un ancla
 # fiable; para more/punch casamos por href exacto o por el código form=.
 _TAG_ANCHOR_JS = r"""
-([url, offerId]) => {
+([url, offerId, title]) => {
   // Parámetro de búsqueda q (case-insensitive) — discriminante estable entre
   // cards, robusto a la normalización de comillas/espacios del navegador.
   const getQ = (href) => {
@@ -289,6 +289,12 @@ _TAG_ANCHOR_JS = r"""
   if (!m && targetQ) m = anchors.find(a => getQ(a.href) === targetQ);
   // 3) por href normalizado exacto
   if (!m) { try { const nu = new URL(url, location.origin).href; m = anchors.find(a => a.href === nu); } catch (e) {} }
+  // 4) por título de la actividad (fallback para /earn: offers como Shopping no
+  //    tienen q= ni offerId en el href, pero su <a> contiene el título).
+  if (!m && title) {
+    const tl = title.trim().toLowerCase().slice(0, 22);
+    if (tl.length >= 6) m = anchors.find(a => (a.innerText || '').trim().toLowerCase().includes(tl));
+  }
   if (!m) return false;
   document.querySelectorAll('[data-msr-act]').forEach(e => e.removeAttribute('data-msr-act'));
   m.setAttribute('data-msr-act', '1');
@@ -311,7 +317,8 @@ async def _open_activity_via_card(page: Page, context: BrowserContext, activity)
     for _ in range(3):
         try:
             tagged = await page.evaluate(
-                _TAG_ANCHOR_JS, [activity.destination_url, activity.offer_id])
+                _TAG_ANCHOR_JS,
+                [activity.destination_url, activity.offer_id, activity.title])
         except Exception as exc:
             log.debug("búsqueda de card falló: %s", exc)
             tagged = False
@@ -394,6 +401,88 @@ async def _process_activities(page: Page, context: BrowserContext, acts: list) -
                 pass
         await sleep_jitter(*config.DELAYS["between_cards"])
     return done
+
+
+# Localiza la card "Listo para reclamar N" (N>0) o un botón "Reclamar" suelto.
+_CLAIM_READY_JS = r"""
+() => {
+  const nodes = [...document.querySelectorAll('button, a, [role="button"]')];
+  const tag = (el) => {
+    document.querySelectorAll('[data-msr-claimnow]').forEach(e => e.removeAttribute('data-msr-claimnow'));
+    el.setAttribute('data-msr-claimnow', '1');
+    el.scrollIntoView({ block: 'center' });
+  };
+  // 1) La card "Listo para reclamar N" con N>0 → clic en la card.
+  for (const el of nodes) {
+    const t = (el.innerText || '').trim();
+    const m = t.match(/listo para reclamar\s+(\d+)/i);
+    if (m && parseInt(m[1], 10) > 0) { tag(el); return {found: true, kind: 'card', pending: parseInt(m[1], 10)}; }
+  }
+  // 2) Un botón "Reclamar"/"Claim" suelto (modal/sección de reclamar).
+  for (const el of nodes) {
+    const t = (el.innerText || '').trim().toLowerCase();
+    if (t === 'reclamar' || t === 'claim') {
+      const r = el.getBoundingClientRect();
+      if (r.width > 4 && r.height > 4) { tag(el); return {found: true, kind: 'boton'}; }
+    }
+  }
+  return {found: false};
+}
+"""
+
+
+async def claim_ready_points(context: BrowserContext) -> int:
+    """
+    Antes de cerrar la sesión del día, entra en "Listo para reclamar" del
+    dashboard y reclama los puntos pendientes (bonus de rachas, etc.). Devuelve
+    cuántos reclamos hizo. No-op si no hay nada pendiente.
+    """
+    page = context.pages[0] if context.pages else await context.new_page()
+    if not await safe_goto(page, REWARDS_URL, attempts=3, timeout=20_000):
+        return 0
+    await sleep_jitter(3.0, 5.0)
+
+    claimed = 0
+    for _ in range(4):  # por si hay varios lotes de puntos pendientes
+        try:
+            res = await page.evaluate(_CLAIM_READY_JS)
+        except Exception as exc:
+            log.debug("escaneo de 'Listo para reclamar' falló: %s", exc)
+            break
+        if not res.get("found"):
+            break
+        extra = f" ({res.get('pending')} pts)" if res.get("pending") else ""
+        log.info("Listo para reclamar: %s%s", res.get("kind"), extra)
+        try:
+            async with context.expect_page(timeout=3500) as info:
+                await page.click('[data-msr-claimnow="1"]', timeout=6000)
+            opened = await info.value
+            await sleep_jitter(2.0, 4.0)
+            try:
+                await opened.close()
+            except Exception:
+                pass
+        except Exception:
+            # Clic sin pestaña nueva (modal/misma página): esperar y seguir.
+            await sleep_jitter(1.5, 3.0)
+        claimed += 1
+        try:
+            await page.reload(wait_until="domcontentloaded", timeout=15_000)
+            await sleep_jitter(2.0, 3.5)
+        except Exception:
+            pass
+
+    # Barrido final por cualquier "Reclamar" residual (bonus/streak sueltos).
+    try:
+        claimed += await _click_claim_buttons(page)
+    except Exception:
+        pass
+
+    if claimed:
+        log.info("puntos pendientes: %d reclamo(s) realizados", claimed)
+    else:
+        log.info("Listo para reclamar: nada pendiente")
+    return claimed
 
 
 async def run_daily(context: BrowserContext) -> int:

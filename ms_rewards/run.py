@@ -39,7 +39,8 @@ from humanize import sleep_jitter
 from launcher import launch, shutdown_chrome
 from searches import run_searches
 from visual_search import run_visual_search
-from daily import run_daily
+from edge_usage import run_edge_minutes
+from daily import run_daily, claim_ready_points
 
 
 class _SingleInstance:
@@ -225,6 +226,20 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
                 log.info("búsqueda por imagen: %s", "ok" if visual_search_done else "no")
             except Exception as exc:
                 log.exception("búsqueda por imagen falló: %s", exc)
+
+        # --- Racha de uso de Edge (30 min) — solo si el navegador es Edge ---
+        try:
+            await run_edge_minutes(context)
+        except Exception as exc:
+            log.exception("racha de Edge falló: %s", exc)
+
+        # --- Reclamar puntos pendientes antes de cerrar la sesión del día ---
+        try:
+            claimed = await claim_ready_points(context)
+            if claimed:
+                log.info("reclamados %d lote(s) de puntos pendientes", claimed)
+        except Exception as exc:
+            log.exception("reclamación de pendientes falló: %s", exc)
 
         # Puntos al final (para diff)
         try:
