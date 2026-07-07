@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 
 from patchright.async_api import BrowserContext, Page
 
@@ -403,83 +404,72 @@ async def _process_activities(page: Page, context: BrowserContext, acts: list) -
     return done
 
 
-# Localiza la card "Listo para reclamar N" (N>0) o un botón "Reclamar" suelto.
-_CLAIM_READY_JS = r"""
-() => {
-  const nodes = [...document.querySelectorAll('button, a, [role="button"]')];
-  const tag = (el) => {
-    document.querySelectorAll('[data-msr-claimnow]').forEach(e => e.removeAttribute('data-msr-claimnow'));
-    el.setAttribute('data-msr-claimnow', '1');
-    el.scrollIntoView({ block: 'center' });
-  };
-  // 1) La card "Listo para reclamar N" con N>0 → clic en la card.
-  for (const el of nodes) {
-    const t = (el.innerText || '').trim();
-    const m = t.match(/listo para reclamar\s+(\d+)/i);
-    if (m && parseInt(m[1], 10) > 0) { tag(el); return {found: true, kind: 'card', pending: parseInt(m[1], 10)}; }
-  }
-  // 2) Un botón "Reclamar"/"Claim" suelto (modal/sección de reclamar).
-  for (const el of nodes) {
-    const t = (el.innerText || '').trim().toLowerCase();
-    if (t === 'reclamar' || t === 'claim') {
-      const r = el.getBoundingClientRect();
-      if (r.width > 4 && r.height > 4) { tag(el); return {found: true, kind: 'boton'}; }
-    }
-  }
-  return {found: false};
-}
-"""
+async def _dismiss_cookies(page: Page) -> None:
+    """Rechaza el banner de cookies (opción que preserva la privacidad) si aparece."""
+    try:
+        await page.evaluate(
+            "() => { for (const b of document.querySelectorAll('button, a'))"
+            " if (/^rechazar$/i.test((b.innerText||'').trim())) { b.click(); return; } }")
+    except Exception:
+        pass
 
 
 async def claim_ready_points(context: BrowserContext) -> int:
     """
-    Antes de cerrar la sesión del día, entra en "Listo para reclamar" del
-    dashboard y reclama los puntos pendientes (bonus de rachas, etc.). Devuelve
-    cuántos reclamos hizo. No-op si no hay nada pendiente.
+    Antes de cerrar la sesión del día, reclama los puntos pendientes de "Listo
+    para reclamar" del dashboard. El flujo real (verificado): la card es un
+    disclosure — al clicarla se despliega un popover con el botón "Cobrar puntos"
+    (NO dice "Reclamar"). Devuelve cuántos lotes cobró; no-op si no hay nada.
     """
     page = context.pages[0] if context.pages else await context.new_page()
     if not await safe_goto(page, REWARDS_URL, attempts=3, timeout=20_000):
         return 0
     await sleep_jitter(3.0, 5.0)
+    await _dismiss_cookies(page)
 
     claimed = 0
-    for _ in range(4):  # por si hay varios lotes de puntos pendientes
+    for _ in range(4):  # por si hay varios lotes pendientes
+        card = page.locator("button", has_text="Listo para reclamar").first
         try:
-            res = await page.evaluate(_CLAIM_READY_JS)
-        except Exception as exc:
-            log.debug("escaneo de 'Listo para reclamar' falló: %s", exc)
-            break
-        if not res.get("found"):
-            break
-        extra = f" ({res.get('pending')} pts)" if res.get("pending") else ""
-        log.info("Listo para reclamar: %s%s", res.get("kind"), extra)
-        try:
-            async with context.expect_page(timeout=3500) as info:
-                await page.click('[data-msr-claimnow="1"]', timeout=6000)
-            opened = await info.value
-            await sleep_jitter(2.0, 4.0)
-            try:
-                await opened.close()
-            except Exception:
-                pass
+            txt = await card.inner_text(timeout=3000)
         except Exception:
-            # Clic sin pestaña nueva (modal/misma página): esperar y seguir.
-            await sleep_jitter(1.5, 3.0)
-        claimed += 1
+            break
+        m = re.search(r"listo para reclamar\s+(\d+)", txt, re.IGNORECASE)
+        if not m or int(m.group(1)) <= 0:
+            break
+        pending = int(m.group(1))
+        log.info("Listo para reclamar: %d pts pendientes", pending)
+
+        # 1) Desplegar el popover de la card (si no lo está ya).
+        try:
+            if (await card.get_attribute("aria-expanded")) != "true":
+                await card.click(timeout=6000)
+                await sleep_jitter(1.5, 2.5)
+        except Exception as exc:
+            log.debug("no se pudo desplegar la card de reclamar: %s", exc)
+
+        # 2) Pulsar "Cobrar puntos" en el popover.
+        cobrar = page.get_by_role("button", name=re.compile("cobrar puntos", re.IGNORECASE))
+        try:
+            if not await cobrar.count():
+                log.info("no apareció 'Cobrar puntos'; nada que cobrar")
+                break
+            await cobrar.first.click(timeout=6000)
+            claimed += 1
+            log.info("cobrados %d pts pendientes", pending)
+        except Exception as exc:
+            log.debug("clic 'Cobrar puntos' falló: %s", exc)
+            break
+
+        # Refrescar para ver el nuevo estado.
         try:
             await page.reload(wait_until="domcontentloaded", timeout=15_000)
             await sleep_jitter(2.0, 3.5)
         except Exception:
             pass
 
-    # Barrido final por cualquier "Reclamar" residual (bonus/streak sueltos).
-    try:
-        claimed += await _click_claim_buttons(page)
-    except Exception:
-        pass
-
     if claimed:
-        log.info("puntos pendientes: %d reclamo(s) realizados", claimed)
+        log.info("puntos pendientes: %d lote(s) cobrados", claimed)
     else:
         log.info("Listo para reclamar: nada pendiente")
     return claimed
