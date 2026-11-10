@@ -58,17 +58,16 @@ async def _read_edge_minutes(page: Page):
 
 
 async def _browse_active(page: Page, minutes: float) -> None:
-    """Navega páginas ligeras con scroll durante ~`minutes` minutos, en primer plano."""
+    """Navega páginas ligeras con scroll durante ~`minutes` minutos."""
     target_s = minutes * 60.0
     start = time.monotonic()
+    # Sin page.bring_to_front() en el bucle: es la única pestaña (ya está
+    # activa) y bringToFront intenta además traer la VENTANA al frente, lo que
+    # roba el foco o hace parpadear Edge en la barra de tareas cada minuto.
     while time.monotonic() - start < target_s:
         url = random.choice(_BROWSE_URLS)
         try:
             await safe_goto(page, url, attempts=2, timeout=20_000)
-        except Exception:
-            pass
-        try:
-            await page.bring_to_front()
         except Exception:
             pass
         # Bloque de "lectura" con scrolls, ~40-70s por página.

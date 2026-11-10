@@ -155,6 +155,9 @@ async def launch(visible: bool = True) -> AsyncIterator[BrowserContext]:
         # No dispara la barra amarilla de Chrome (esa lista solo incluye
         # flags como --no-sandbox o --enable-automation).
         "--disable-blink-features=AutomationControlled",
+        # Sin sonido: MSN/Bing ponen vídeos con autoplay y el bot corre mientras
+        # la gente juega o ve algo. Silencia la salida; la página no lo nota.
+        "--mute-audio",
     ]
 
     # Posición de la ventana: visible (0,0) si es interactiva, fuera de

@@ -155,7 +155,11 @@ def _git(*args: str, timeout: int = 30) -> tuple[int, str]:
             cwd=str(_REPO_ROOT),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except Exception as exc:

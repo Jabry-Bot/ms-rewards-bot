@@ -70,17 +70,45 @@ def _scheduler():
     return svc
 
 
-def install_task(task_name: str = TASK_NAME) -> None:
+# Versión de la DEFINICIÓN de la tarea (triggers/settings). Va en la
+# descripción; ensure_task_current() re-registra las tareas de versiones
+# anteriores. Súbela cuando cambie algo de install_task().
+#   v2: repetición cada 30 min en ambos triggers (reintentos si se pospuso por
+#       juego a pantalla completa o falló la sesión).
+TASK_SCHEMA = "v2"
+_TASK_DESC = f"Microsoft Rewards bot (auto-run diario) [{TASK_SCHEMA}]"
+
+# Reintentos: tras cada disparo, la tarea se repite cada RETRY_INTERVAL durante
+# un rato. Si el día ya está hecho, run.py sale en ~1 s sin abrir nada; si hay
+# una corrida en marcha, el Task Scheduler ignora la repetición (IgnoreNew).
+RETRY_INTERVAL = "PT30M"
+LOGON_RETRY_FOR = "PT12H"
+DAILY_RETRY_FOR = "PT10H"
+
+
+def _set_repetition(trigger, duration: str) -> None:
+    rep = trigger.Repetition
+    rep.Interval = RETRY_INTERVAL
+    rep.Duration = duration
+    rep.StopAtDurationEnd = False
+
+
+def install_task(task_name: str = TASK_NAME, *, daily_time: str | None = None,
+                 logon_delay: str | None = None) -> None:
     """
     Registra la Scheduled Task del bot: arranca al iniciar sesión (con un
-    retardo aleatorio) y a diario a una hora aleatoria entre las 10:00 y 14:00.
+    retardo aleatorio) y a diario a una hora aleatoria entre las 10:00 y 14:00,
+    y en ambos casos se reintenta cada 30 min durante unas horas.
     Idempotente (CREATE_OR_UPDATE). Equivalente al antiguo install_task.ps1.
+
+    daily_time ("HH:MM") y logon_delay ("PT5M") permiten conservar los valores
+    de una tarea ya registrada al migrarla; si faltan se eligen al azar.
     """
     svc = _scheduler()
     root = svc.GetFolder("\\")
     td = svc.NewTask(0)
 
-    td.RegistrationInfo.Description = "Microsoft Rewards bot (auto-run diario)"
+    td.RegistrationInfo.Description = _TASK_DESC
 
     user = current_user()
     exe = str(_VENV_PYW if _VENV_PYW.exists() else _VENV_PY)
@@ -89,15 +117,21 @@ def install_task(task_name: str = TASK_NAME) -> None:
     # Logon (tipo 9) con retardo PT2-10M.
     logon = td.Triggers.Create(9)
     logon.UserId = user
-    logon.Delay = f"PT{random.randint(2, 10)}M"
+    logon.Delay = logon_delay or f"PT{random.randint(2, 10)}M"
+    _set_repetition(logon, LOGON_RETRY_FOR)
 
     # Daily (tipo 2) a hora aleatoria 10:00-13:59. La fecha del StartBoundary
     # solo fija la HORA de disparo; el día es indiferente para -Daily.
     daily = td.Triggers.Create(2)
-    hh = random.randint(10, 13)
-    mm = random.randint(0, 59)
+    hh, mm = random.randint(10, 13), random.randint(0, 59)
+    if daily_time:
+        try:
+            hh, mm = (int(x) for x in daily_time.split(":")[:2])
+        except ValueError:
+            pass
     daily.StartBoundary = f"2020-01-01T{hh:02d}:{mm:02d}:00"
     daily.DaysInterval = 1
+    _set_repetition(daily, DAILY_RETRY_FOR)
 
     # --- Action: pythonw run.py --scheduled ---
     action = td.Actions.Create(0)  # TASK_ACTION_EXEC
@@ -122,8 +156,39 @@ def install_task(task_name: str = TASK_NAME) -> None:
 
     # CREATE_OR_UPDATE=6, logonType interactive token=3
     root.RegisterTaskDefinition(task_name, td, 6, user, None, 3)
-    log.info("Scheduled Task '%s' registrada (logon + diaria %02d:%02d)",
-             task_name, hh, mm)
+    log.info("Scheduled Task '%s' registrada (logon + diaria %02d:%02d, "
+             "reintentos cada %s)", task_name, hh, mm, RETRY_INTERVAL)
+
+
+def ensure_task_current(task_name: str = TASK_NAME) -> bool:
+    """
+    Si la tarea registrada es de una versión anterior (sin `[TASK_SCHEMA]` en la
+    descripción), la re-registra conservando su hora diaria y su retardo de
+    logon. No crea la tarea si no existe (eso es decisión del usuario/panel).
+    Devuelve True si la actualizó. Nunca lanza.
+    """
+    try:
+        root = _scheduler().GetFolder("\\")
+        task = root.GetTask(task_name)
+    except Exception:
+        return False
+    try:
+        td = task.Definition
+        if f"[{TASK_SCHEMA}]" in (td.RegistrationInfo.Description or ""):
+            return False
+        daily_time = logon_delay = None
+        for i in range(1, td.Triggers.Count + 1):
+            trg = td.Triggers.Item(i)
+            if trg.Type == 2:     # TASK_TRIGGER_DAILY
+                daily_time = (trg.StartBoundary or "")[11:16] or None
+            elif trg.Type == 9:   # TASK_TRIGGER_LOGON
+                logon_delay = trg.Delay or None
+        install_task(task_name, daily_time=daily_time, logon_delay=logon_delay)
+        log.info("Scheduled Task '%s' migrada a %s", task_name, TASK_SCHEMA)
+        return True
+    except Exception as exc:
+        log.warning("no se pudo actualizar la Scheduled Task: %s", exc)
+        return False
 
 
 def uninstall_task(task_name: str = TASK_NAME) -> bool:

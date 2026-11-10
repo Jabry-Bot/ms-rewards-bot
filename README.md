@@ -24,9 +24,16 @@ El instalador hace todo el trabajo:
   - Si esta máquina es del **maintainer** (auto-fix con Ollama). Si no sabes lo que es, di que no.
 - Abre Chrome y hace login automáticamente.
   - **La primera vez Microsoft puede pedir 2FA / captcha**. Completa la verificación en la ventana de Chrome y pulsa Enter en la consola. Después, la sesión queda guardada en el perfil durante semanas o meses.
-- Registra una Scheduled Task `MsRewardsBot` que arranca al iniciar sesión + diariamente a una hora aleatoria entre las 10:00 y las 14:00.
+- Registra una Scheduled Task `MsRewardsBot` que arranca al iniciar sesión + diariamente a una hora aleatoria entre las 10:00 y las 14:00, y se reintenta cada 30 min durante unas horas.
 
-A partir de ahí, el bot se ejecuta solo cada día. Si ya completó las búsquedas hoy, no hace nada.
+A partir de ahí, el bot se ejecuta solo cada día. Si ya completó las búsquedas hoy, sale al instante sin abrir nada.
+
+### No molesta mientras usas el PC
+
+- **Sin ventanas de consola:** la tarea arranca `pythonw.exe`, que se relanza como `python.exe` con consola invisible (`ms_rewards/quiet.py`). Nada de lo que lanza después (git, el driver del navegador…) puede abrir una ventana ni robar el foco.
+- **Pospone si estás jugando:** si hay un juego o una app a pantalla completa, la corrida automática se pospone y la tarea la reintenta en 30 min. A partir de las 21:00 ya no se pospone (para no perder el día; corre igualmente en segundo plano). Cámbialo con `MSR_GAME_DEADLINE_HOUR` (`24` = nunca mientras haya pantalla completa).
+- **Navegador fuera de pantalla y sin sonido** (`--mute-audio`).
+- Si la sesión cae de verdad, deja de reintentar tras 3 intentos ese día hasta que hagas **Login manual** en el panel.
 
 ## Modo maintainer
 

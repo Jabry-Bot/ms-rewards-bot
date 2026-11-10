@@ -381,6 +381,26 @@ def completed_today(last_run: dict[str, Any] | None = None) -> bool:
     return last_run.get("last_completed") == date.today().isoformat()
 
 
+# Códigos de LastTaskResult habituales → texto. Con los reintentos cada 30 min,
+# 0x800710E0 aparece a menudo y NO es un error: el Task Scheduler ignoró la
+# repetición porque ya había una corrida en marcha (MultipleInstances=IgnoreNew).
+_TASK_RESULTS: dict[int, str] = {
+    0: "OK",
+    0x41301: "en marcha",
+    0x41303: "aún no se ha ejecutado",
+    0x800710E0: "omitida: ya había una corrida en marcha",
+}
+
+
+def task_result_text(code: Any) -> str:
+    """Texto legible para LastTaskResult (o 'código N' si no se conoce)."""
+    try:
+        n = int(code)
+    except (TypeError, ValueError):
+        return "código ?"
+    return _TASK_RESULTS.get(n & 0xFFFFFFFF, f"código {n}")
+
+
 def format_status(last_run: dict[str, Any], task: dict[str, Any] | None = None) -> str:
     """
     Resumen multilínea legible del estado del bot, para el panel lateral.
@@ -427,7 +447,7 @@ def format_status(last_run: dict[str, Any], task: dict[str, Any] | None = None) 
             lines.append(f"  Próxima: {task['next_run']}")
         if task.get("last_run"):
             lines.append(
-                f"  Última: {task['last_run']} (código {task.get('last_result', '?')})"
+                f"  Última: {task['last_run']} ({task_result_text(task.get('last_result'))})"
             )
     else:
         lines.append("Tarea programada: NO registrada")

@@ -68,7 +68,22 @@ def mark_completed(searches_done: int, daily_done: int, status: str = "ok") -> N
 
 
 def mark_needs_relogin() -> None:
-    write(status="needs_relogin")
+    """Marca la sesión como caída y cuenta el fallo (por día)."""
+    data = read().get("relogin_failures") or {}
+    count = int(data.get("count", 0)) + 1 if data.get("date") == _today() else 1
+    write(status="needs_relogin", relogin_failures={"date": _today(), "count": count})
+
+
+def clear_relogin_failures() -> None:
+    """Sesión confirmada (o login manual): vuelve a permitir los reintentos."""
+    if read().get("relogin_failures"):
+        write(relogin_failures=None)
+
+
+def relogin_failures_today() -> int:
+    """Cuántas corridas de hoy acabaron sin sesión."""
+    data = read().get("relogin_failures") or {}
+    return int(data.get("count", 0)) if data.get("date") == _today() else 0
 
 
 def mark_selectors_broken(broken_keys: list[str]) -> None:

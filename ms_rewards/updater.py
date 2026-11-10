@@ -2,10 +2,14 @@
 Auto-update vía git pull condicional.
 
 Política:
-  - Antes de cada ejecución, comparamos VERSION local con VERSION remoto.
-  - Si difieren, hacemos git pull --ff-only y, si entraron cambios en .py o
-    en selectors.json, relanzamos el proceso (os.execv) para que el código
-    nuevo entre en vigor antes de continuar.
+  - Antes de cada ejecución que vaya a hacer trabajo (si el día ya está
+    completado, run.py ni siquiera llega aquí), comparamos VERSION local con
+    VERSION remoto.
+  - Si difieren, hacemos git pull --ff-only y relanzamos el proceso (un hijo
+    nuevo con subprocess, ver relaunch()) para que el código nuevo entre en
+    vigor antes de continuar.
+  - Todas las llamadas a git van con CREATE_NO_WINDOW: desde la Scheduled Task
+    (pythonw, sin consola) cada git.exe abría su propia ventana de consola.
   - Si algo falla (sin red, repo no es git, conflicto local) NO abortamos:
     el bot tiene que seguir ejecutándose con la versión que tenga.
 
@@ -20,10 +24,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+from quiet import NO_WINDOW
+
 log = logging.getLogger("updater")
 
 _REPO_ROOT = Path(__file__).parent
 _VERSION_FILE = _REPO_ROOT / "VERSION"
+
+# Marca de entorno del proceso relanzado tras un update: no vuelve a comprobar
+# actualizaciones (evita un bucle si el pull no llegara a igualar VERSION).
+RELAUNCHED_ENV = "MSR_RELAUNCHED"
+
+
+class RelaunchRequested(Exception):
+    """El update metió código nuevo: hay que relanzar (tras soltar el lock)."""
 
 
 def _run_git(*args: str, timeout: int = 30) -> tuple[int, str, str]:
@@ -33,7 +47,11 @@ def _run_git(*args: str, timeout: int = 30) -> tuple[int, str, str]:
             cwd=str(_REPO_ROOT),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
+            creationflags=NO_WINDOW,
         )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except FileNotFoundError:
@@ -122,9 +140,27 @@ def update_if_needed() -> bool:
     return True
 
 
-def relaunch() -> None:
-    """Relanza el proceso actual con el mismo intérprete y mismos args."""
+def already_relaunched() -> bool:
+    """True si este proceso es el relanzado tras un update."""
+    return os.environ.get(RELAUNCHED_ENV) == "1"
+
+
+def relaunch() -> int:
+    """
+    Relanza el bot con el mismo intérprete y args, espera y devuelve su código.
+
+    Antes era os.execv, pero en Windows execv NO entrecomilla los argumentos:
+    con la instalación en %LOCALAPPDATA% y un usuario con espacio en el nombre
+    ("C:\\Users\\Juan Pérez\\...") el proceso nuevo recibía la ruta partida y
+    moría. subprocess con lista sí entrecomilla. El hijo hereda la consola (o
+    su ausencia) y stdout, así que el panel sigue viendo el log.
+    El llamador debe soltar antes el lock de instancia única.
+    """
     log.info("relanzando proceso para cargar el código nuevo")
-    python = sys.executable
-    args = [python] + sys.argv
-    os.execv(python, args)
+    env = dict(os.environ)
+    env[RELAUNCHED_ENV] = "1"
+    try:
+        return subprocess.run([sys.executable, *sys.argv], env=env).returncode
+    except Exception as exc:
+        log.warning("no se pudo relanzar (%s)", exc)
+        return 1

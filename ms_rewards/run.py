@@ -11,12 +11,16 @@ Uso:
   py run.py --kill          # mata cualquier Chrome del bot colgado
 
 Flujo automático (ejecución normal):
-  1. updater.update_if_needed()  → git pull si VERSION remoto != local
-  2. runstate.completed_today()  → si ya se completó hoy, sale
-  3. launch() + verificar sesión activa; si caducó, intentar login auto
-  4. daily set + búsquedas
-  5. healer.heal(...) por cada selector roto (solo si MAINTAINER)
-  6. runstate.mark_completed(...)
+  0. bajo pythonw (Scheduled Task) se relanza como python.exe con consola
+     invisible (quiet.respawn_hidden) → git/node/taskkill no abren ventanas
+  1. runstate.completed_today()  → si ya se completó hoy, sale (sin git ni navegador)
+  2. corrida automática + juego/app a pantalla completa → se pospone; la tarea
+     lo reintenta cada 30 min (quiet.user_busy)
+  3. updater.update_if_needed()  → git pull si VERSION remoto != local
+  4. launch() + verificar sesión activa; si caducó, intentar login auto
+  5. daily set + búsquedas
+  6. healer.heal(...) por cada selector roto (solo si MAINTAINER)
+  7. runstate.mark_completed(...)
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ import config
 import credentials
 import daily as daily_mod
 import login as login_mod
+import quiet
 import rewards_info
 import runstate
 import updater
@@ -128,6 +133,13 @@ async def _ensure_session(context) -> bool:
     log = logging.getLogger("run")
     if await login_mod.is_session_alive(context):
         return True
+    # Segunda opinión antes de rendirse: el botón de "Iniciar sesión" puede verse
+    # un instante mientras la página refresca el SSO, y entonces el autologin
+    # buscaba un campo de email que no existe (la sesión SÍ estaba viva) y se
+    # perdía la corrida. La API interna solo devuelve puntos con sesión válida.
+    if await login_mod.session_alive_via_api(context):
+        log.info("falsa alarma: la API confirma que la sesión sigue activa")
+        return True
     log.warning("sesión caducada o no iniciada — intentando autologin")
     creds = credentials.load()
     if not creds:
@@ -171,8 +183,9 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         # Verificar sesión antes de hacer nada
         if not await _ensure_session(context):
             runstate.mark_needs_relogin()
-            log.error("sesión no disponible — abortando. Re-ejecuta setup.bat")
+            log.error("sesión no disponible — abortando. Usa «Login manual» en el panel")
             return 0, 0, False, info
+        runstate.clear_relogin_failures()
 
         # Detectar nivel + puntos iniciales
         try:
@@ -298,6 +311,9 @@ def _setup_mode() -> None:
     """Abre Chrome para que el usuario haga login a mano y luego sale."""
     from launcher import _spawn_chrome  # noqa: PLC0415
     log = logging.getLogger("run")
+    # Login manual: las corridas automáticas vuelven a intentarlo aunque hoy
+    # ya hubieran agotado los intentos sin sesión.
+    runstate.clear_relogin_failures()
     proc = _spawn_chrome()
     log.info(
         "Chrome lanzado en :%d con perfil %s.\n"
@@ -313,7 +329,20 @@ def _setup_mode() -> None:
             pass
 
 
+# Corridas automáticas seguidas sin sesión antes de dejar de intentarlo ese día
+# (hace falta login manual desde el panel; no tiene sentido abrir el navegador
+# cada 30 min para nada).
+_MAX_RELOGIN_TRIES = 3
+
+
 def main() -> int:
+    # 0) Bajo pythonw (Scheduled Task) nos relanzamos con consola invisible:
+    #    así ningún programa de consola que lancemos (git, el driver de
+    #    patchright...) puede abrir una ventana encima del juego del usuario.
+    code = quiet.respawn_hidden(os.path.abspath(__file__), sys.argv[1:])
+    if code is not None:
+        return code
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--daily", action="store_true", help="solo daily set")
     parser.add_argument("--searches", action="store_true", help="solo búsquedas")
@@ -370,32 +399,69 @@ def main() -> int:
 
     try:
         return _main_locked(args, log)
+    except updater.RelaunchRequested:
+        pass
     finally:
         instance.release()
+    # Entró código nuevo: relanzar ya sin el lock (el hijo lo toma).
+    return updater.relaunch()
 
 
 def _main_locked(args, log) -> int:
-    # 1) Auto-update (puede relanzar el proceso)
-    if not args.no_update:
-        try:
-            updated = updater.update_if_needed()
-            if updated:
-                updater.relaunch()  # no retorna
-        except Exception as exc:
-            log.warning("auto-update falló: %s (continuando con la versión local)", exc)
+    automatic = _is_automatic_run(args.scheduled)
 
-    # 2) Idempotencia diaria
+    # Migración de la tarea programada (añade los reintentos cada 30 min). Solo
+    # desde la propia tarea: rápido, y no hace nada si ya está al día.
+    if automatic:
+        try:
+            import winutil  # noqa: PLC0415
+            if winutil.ensure_task_current():
+                log.info("tarea programada actualizada (reintentos cada 30 min)")
+        except Exception as exc:
+            log.warning("no se pudo revisar la tarea programada: %s", exc)
+
+    # 1) Idempotencia diaria — lo primero: si ya está hecho no se lanza nada
+    #    (antes el auto-update corría git 7 veces incluso para salir sin hacer nada).
     if not args.force and runstate.completed_today():
         log.info("ya completado hoy (%s) — saliendo. Usa --force para forzar.",
                  runstate.read().get("updated_at"))
         return 0
+
+    if automatic:
+        # Sesión caída de verdad: tras varios intentos hoy, esperar al login
+        # manual en vez de abrir el navegador cada 30 min.
+        fails = runstate.relogin_failures_today()
+        if fails >= _MAX_RELOGIN_TRIES:
+            log.info("sin sesión en %d intentos hoy — se espera a que hagas login "
+                     "desde el panel", fails)
+            return 0
+        # 2) No molestar: juego / app a pantalla completa → posponer.
+        reason = quiet.user_busy()
+        if quiet.should_postpone(reason):
+            log.info("%s detectado — corrida pospuesta; la tarea lo reintentará "
+                     "en ~30 min (a partir de las %d:00 ya no se pospone)",
+                     reason, quiet.game_deadline_hour())
+            return 0
+        if reason:
+            log.info("%s detectado, pero ya es tarde — se corre igualmente "
+                     "(en segundo plano, sin ventanas)", reason)
+
+    # 3) Auto-update (si entra código nuevo, main() relanza el proceso)
+    if not args.no_update and not updater.already_relaunched():
+        updated = False
+        try:
+            updated = updater.update_if_needed()
+        except Exception as exc:
+            log.warning("auto-update falló: %s (continuando con la versión local)", exc)
+        if updated:
+            raise updater.RelaunchRequested()
 
     do_daily = args.daily or (not args.daily and not args.searches)
     do_searches = args.searches or (not args.daily and not args.searches)
 
     # Ventana visible salvo en la corrida automática programada o si el usuario
     # pidió explícitamente segundo plano (--hidden) en una corrida manual.
-    visible = not (_is_automatic_run(args.scheduled) or args.hidden)
+    visible = not (automatic or args.hidden)
 
     try:
         searches_done, visual_search_done, daily_done, info = asyncio.run(

@@ -56,12 +56,40 @@ async def _is_signed_in(page: Page) -> bool:
 
 
 async def is_session_alive(context: BrowserContext) -> bool:
-    """Carga rewards.bing.com y comprueba que no haya botón de login."""
+    """
+    Carga rewards.bing.com y comprueba que no haya botón de login.
+
+    Si a la primera parece no haber sesión, espera y recarga una vez: al abrir
+    el navegador el SSO de Microsoft a veces tarda unos segundos en refrescar la
+    cookie y el botón de "Iniciar sesión" se ve un instante aunque la sesión
+    esté viva (en los logs: falla y 7 min después entra sin login).
+    """
     page = context.pages[0] if context.pages else await context.new_page()
     if not await safe_goto(page, REWARDS_HOME, attempts=4, timeout=20_000):
         return False
     await sleep_jitter(2.0, 4.0)
+    if await _is_signed_in(page):
+        return True
+    log.info("parece que no hay sesión — reintentando en unos segundos")
+    await sleep_jitter(5.0, 8.0)
+    if not await safe_goto(page, REWARDS_HOME, attempts=2, timeout=20_000):
+        return False
+    await sleep_jitter(2.0, 4.0)
     return await _is_signed_in(page)
+
+
+async def session_alive_via_api(context: BrowserContext) -> bool:
+    """
+    Comprobación independiente del DOM: /api/getuserinfo solo devuelve los
+    puntos de la cuenta si la sesión es válida.
+    """
+    try:
+        import dashboard_api  # noqa: PLC0415
+        dash = await dashboard_api.fetch_dashboard(context, navigate=True)
+        return dashboard_api.parse_points(dash) is not None
+    except Exception as exc:
+        log.debug("comprobación de sesión por API falló: %s", exc)
+        return False
 
 
 async def _detect_twofa(page: Page) -> bool:
@@ -93,6 +121,12 @@ async def perform_login(
     try:
         await human_type(page, selectors.get("login.email_input"), email)
     except Exception as exc:
+        # Sin campo de email suele significar que login.live.com nos reconoció
+        # (sesión ya iniciada → redirige a la cuenta). Confirmarlo antes de
+        # dar la corrida por perdida.
+        if await session_alive_via_api(context):
+            log.info("login.live.com no pidió email: la sesión ya estaba activa")
+            return True
         log.error("no se pudo escribir el email: %s", exc)
         return False
     await sleep_jitter(0.5, 1.4)
