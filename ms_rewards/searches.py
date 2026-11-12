@@ -113,10 +113,17 @@ async def _do_one_search(page: Page, query: str, idx: int, total: int) -> None:
             log.debug("click en resultado falló (ignorando): %s", exc)
 
 
-async def run_searches(context: BrowserContext, count: int | None = None) -> int:
-    """Ejecuta `count` búsquedas. Devuelve el número que se completó."""
+async def run_searches(context: BrowserContext, count: int | None = None, *,
+                       offset: int = 0) -> int:
+    """
+    Ejecuta `count` búsquedas. Devuelve el número que se completó.
+
+    `offset`: cuántas consultas de hoy se usaron ya en esta corrida. Las
+    consultas salen de una semilla fija por día, así que sin offset una segunda
+    tanda repetiría las primeras — y Bing no acredita búsquedas repetidas.
+    """
     count = count or config.SEARCH_COUNT
-    queries = generate_queries(count)
+    queries = generate_queries(offset + count)[offset:]
 
     # Reutilizamos una pestaña si ya hay alguna abierta (la del rewards)
     pages = context.pages

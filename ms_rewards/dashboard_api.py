@@ -23,6 +23,7 @@ Este módulo NO ejecuta nada: solo lee y normaliza. daily.py consume
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -122,16 +123,56 @@ def parse_points(dashboard: dict) -> int | None:
     return pts if isinstance(pts, int) else None
 
 
+def parse_pc_search(dashboard: dict) -> tuple[int, int, int] | None:
+    """
+    (progreso, máximo, puntos_por_búsqueda) del contador de búsquedas de PC de
+    hoy (userStatus.counters.pcSearch), o None si no viene. Es la fuente de
+    verdad de cuántas búsquedas faltan: el tope cambia con el nivel y con el
+    tiempo (2026-11: nivel Oro = 120 pts a 3 por búsqueda = 40 búsquedas).
+    """
+    counters = _user_status(dashboard).get("counters")
+    items = counters.get("pcSearch") if isinstance(counters, dict) else None
+    if not isinstance(items, list) or not items:
+        return None
+    prog = mx = 0
+    pps = 3
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            prog += int(it.get("pointProgress") or 0)
+            mx += int(it.get("pointProgressMax") or 0)
+        except (TypeError, ValueError):
+            continue
+        desc = str((it.get("attributes") or {}).get("description", ""))
+        m = re.search(r"(\d+)\s*puntos?\s+por\s+b|(\d+)\s*points?\s+per\s+search", desc, re.I)
+        if m:
+            pps = int(m.group(1) or m.group(2))
+    return (prog, mx, pps) if mx > 0 else None
+
+
+def daily_set_status(dashboard: dict) -> tuple[int, int] | None:
+    """(completadas, total) del conjunto diario de hoy, o None si no viene."""
+    daily = dashboard.get("dailySetPromotions")
+    key = _today_key(daily) if isinstance(daily, dict) else None
+    if not key:
+        return None
+    items = [p for p in daily.get(key, []) or [] if isinstance(p, dict)]
+    return sum(1 for p in items if p.get("complete")), len(items)
+
+
 def parse_user_info(dashboard: dict) -> dict[str, Any]:
     """{'level', 'level_name', 'points', 'source'} desde el dict dashboard."""
     if not dashboard:
-        return {"level": None, "level_name": None, "points": None, "source": None}
+        return {"level": None, "level_name": None, "points": None, "source": None,
+                "pc_search": None}
     level, name = parse_level(dashboard)
     return {
         "level": level,
         "level_name": name,
         "points": parse_points(dashboard),
         "source": "api" if (level or parse_points(dashboard) is not None) else None,
+        "pc_search": parse_pc_search(dashboard),
     }
 
 

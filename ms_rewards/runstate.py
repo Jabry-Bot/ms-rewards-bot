@@ -67,6 +67,23 @@ def mark_completed(searches_done: int, daily_done: int, status: str = "ok") -> N
     )
 
 
+def mark_incomplete(searches_done: int, daily_done: int) -> None:
+    """
+    La corrida terminó pero la verificación ve cosas sin acreditar: NO marca el
+    día como completado (la tarea lo reintenta) y cuenta el intento.
+    """
+    data = read().get("incomplete_runs") or {}
+    count = int(data.get("count", 0)) + 1 if data.get("date") == _today() else 1
+    write(status="incomplete", searches_done=searches_done, daily_done=daily_done,
+          incomplete_runs={"date": _today(), "count": count})
+
+
+def incomplete_runs_today() -> int:
+    """Cuántas corridas de hoy terminaron con la verificación incompleta."""
+    data = read().get("incomplete_runs") or {}
+    return int(data.get("count", 0)) if data.get("date") == _today() else 0
+
+
 def mark_needs_relogin() -> None:
     """Marca la sesión como caída y cuenta el fallo (por día)."""
     data = read().get("relogin_failures") or {}

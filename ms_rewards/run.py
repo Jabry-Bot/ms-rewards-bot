@@ -40,6 +40,7 @@ import quiet
 import rewards_info
 import runstate
 import updater
+import verify
 from humanize import sleep_jitter
 from launcher import launch, shutdown_chrome
 from searches import run_searches
@@ -173,6 +174,7 @@ def _is_automatic_run(scheduled_flag: bool) -> bool:
 async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple[int, int, bool, dict]:
     log = logging.getLogger("run")
     searches_done = 0
+    searches_used = 0  # consultas de hoy ya usadas (offset para las extra)
     visual_search_done = False
     daily_done = 0
     info: dict = {"level": None, "points_before": None, "points_after": None}
@@ -184,6 +186,7 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         if not await _ensure_session(context):
             runstate.mark_needs_relogin()
             log.error("sesión no disponible — abortando. Usa «Login manual» en el panel")
+            info["session_failed"] = True
             return 0, 0, False, info
         runstate.clear_relogin_failures()
 
@@ -192,6 +195,7 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
             ui = await rewards_info.get_user_info(context)
             info["level"] = ui.get("level")
             info["points_before"] = ui.get("points")
+            info["pc_search"] = ui.get("pc_search")
             log.info(
                 "estado cuenta: nivel=%s puntos=%s fuente=%s",
                 ui.get("level"), ui.get("points"), ui.get("source"),
@@ -214,19 +218,31 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
 
         if do_searches:
             log.info("=== BÚSQUEDAS BING ===")
-            # Ajustar cantidad según nivel detectado (si MSR_SEARCH_COUNT no
-            # está fijado explícitamente por el usuario).
+            # Cuántas búsquedas: lo que diga el contador de la API (lo que falta
+            # hasta el tope real de hoy, +2 de margen por si alguna no cuenta).
+            # Si no viene, la tabla por nivel. MSR_SEARCH_COUNT manda siempre.
             count = config.SEARCH_COUNT
-            if "MSR_SEARCH_COUNT" not in os.environ and info["level"] in config.SEARCH_COUNT_BY_LEVEL:
+            pc = info.get("pc_search")
+            if "MSR_SEARCH_COUNT" in os.environ:
+                pass
+            elif pc is not None:
+                count = verify.searches_needed(pc, margin=2) or 0
+                log.info("contador de búsquedas de PC: %d/%d → %d búsqueda(s)",
+                         pc[0], pc[1], count)
+            elif info["level"] in config.SEARCH_COUNT_BY_LEVEL:
                 count = config.SEARCH_COUNT_BY_LEVEL[info["level"]]
                 log.info(
                     "nivel %d → objetivo de búsquedas: %d", info["level"], count
                 )
-            try:
-                searches_done = await run_searches(context, count=count)
-                log.info("búsquedas: %d", searches_done)
-            except Exception as exc:
-                log.exception("búsquedas fallaron: %s", exc)
+            searches_used = count
+            if count > 0:
+                try:
+                    searches_done = await run_searches(context, count=count)
+                    log.info("búsquedas: %d", searches_done)
+                except Exception as exc:
+                    log.exception("búsquedas fallaron: %s", exc)
+            else:
+                log.info("búsquedas de PC ya completas hoy — se omiten")
 
             # --- Búsqueda diaria por imagen (racha Visual Search) ---
             # Una sola búsqueda por imagen al día mantiene la racha nueva de
@@ -245,6 +261,17 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
             await run_edge_minutes(context)
         except Exception as exc:
             log.exception("racha de Edge falló: %s", exc)
+
+        # --- Verificación final: comprobar en Rewards que todo se acreditó y
+        #     repetir lo que falte (excepto lo de móvil) antes de terminar ---
+        try:
+            ver = await verify.verify_and_fix(
+                context, do_daily=do_daily, do_searches=do_searches,
+                searches_used=searches_used)
+            info["verification"] = ver
+            searches_done += int(ver.get("extra_searches") or 0)
+        except Exception as exc:
+            log.exception("verificación final falló: %s", exc)
 
         # --- Reclamar puntos pendientes antes de cerrar la sesión del día ---
         try:
@@ -333,6 +360,10 @@ def _setup_mode() -> None:
 # (hace falta login manual desde el panel; no tiene sentido abrir el navegador
 # cada 30 min para nada).
 _MAX_RELOGIN_TRIES = 3
+
+# Corridas al día que pueden acabar con la verificación incompleta antes de
+# dar el día por terminado igualmente.
+_MAX_INCOMPLETE_RUNS = 3
 
 
 def main() -> int:
@@ -483,16 +514,38 @@ def _main_locked(args, log) -> int:
     except Exception as exc:
         log.exception("post-run heal falló: %s", exc)
 
+    # Sin sesión: mark_needs_relogin ya dejó el estado; no pisarlo con "empty".
+    if info.get("session_failed"):
+        return 0
+
     # 4) Estado final (incluye nivel y puntos para visibilidad del usuario)
     if daily_mod.broken_selectors:
         runstate.mark_selectors_broken([b["key"] for b in daily_mod.broken_selectors])
+    ver = info.get("verification")
     runstate.write(
         level=info.get("level"),
         points_before=info.get("points_before"),
         points_after=info.get("points_after"),
         visual_search_done=visual_search_done,
+        verification=ver,
     )
-    if searches_done == 0 and daily_done == 0 and not visual_search_done:
+    if ver is not None:
+        # La verificación manda: el día solo se da por completado si lo
+        # importante está acreditado. Si no, la tarea lo reintenta en ~30 min
+        # (hasta _MAX_INCOMPLETE_RUNS corridas al día, para no entrar en bucle).
+        retry = ver.get("retry") or []
+        prev = runstate.incomplete_runs_today()
+        if retry and prev + 1 < _MAX_INCOMPLETE_RUNS:
+            runstate.mark_incomplete(searches_done, daily_done)
+            log.warning("día sin completar (%s) — la tarea lo reintentará en ~30 min "
+                        "(intento %d/%d)", ", ".join(retry), prev + 1, _MAX_INCOMPLETE_RUNS)
+        else:
+            if retry:
+                log.warning("sigue sin completar tras %d corridas hoy (%s) — se da el "
+                            "día por terminado", prev + 1, ", ".join(retry))
+            runstate.mark_completed(searches_done, daily_done,
+                                    status="incomplete" if retry else "ok")
+    elif searches_done == 0 and daily_done == 0 and not visual_search_done:
         runstate.write(status="empty", searches_done=0, daily_done=0)
     else:
         runstate.mark_completed(searches_done, daily_done, status="ok")

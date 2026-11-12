@@ -533,6 +533,9 @@ async def run_daily(context: BrowserContext) -> int:
         else:
             log.warning("no se pudo cargar /earn; se omiten las actividades extra")
 
+    # 3) Verificar y reintentar lo que no se haya acreditado.
+    await retry_unconfirmed(context, page)
+
     # Volver al dashboard y reclamar bonus de streak/daily que hayan aparecido.
     try:
         await safe_goto(page, REWARDS_URL, attempts=3, timeout=20_000)
@@ -543,13 +546,81 @@ async def run_daily(context: BrowserContext) -> int:
     except Exception as exc:
         log.debug("reclamación en dashboard falló: %s", exc)
 
-    # Confirmar cuántas quedan pendientes tras la corrida (re-consultando la API).
-    try:
-        after = await dashboard_api.fetch_dashboard(context, navigate=False)
-        remaining = len(dashboard_api.pending_activities(after)) if after else -1
-        log.info("daily set: %d actividades ejecutadas; pendientes restantes: %s",
-                 done, remaining if remaining >= 0 else "?")
-    except Exception:
-        pass
+    # Confirmar cuántas quedan pendientes tras la corrida, y CUÁLES: así en el
+    # log se ve si se ha quedado algo del conjunto diario.
+    remaining = await _remaining_activities(context, page)
+    if remaining is None:
+        log.info("daily set: %d actividades ejecutadas; pendientes restantes: ?", done)
+    else:
+        log.info("daily set: %d actividades ejecutadas; pendientes restantes: %d",
+                 done, len(remaining))
+        left_daily = [a.title[:45] for a in remaining if a.source == "daily"]
+        if left_daily:
+            log.warning("conjunto diario SIN acreditar tras reintentar: %s",
+                        ", ".join(left_daily))
+        others = [f"{a.title[:30]} [{a.source}]" for a in remaining if a.source != "daily"]
+        if others:
+            log.info("otras pendientes: %s", ", ".join(others))
 
     return done
+
+
+# Rondas máximas de verificación + reintento del conjunto diario.
+_RETRY_ROUNDS = 2
+
+
+async def retry_unconfirmed(context: BrowserContext, page: Page | None = None, *,
+                            rounds: int = _RETRY_ROUNDS,
+                            include_more: bool = True) -> list | None:
+    """
+    Re-consulta la API y repite las actividades que sigan SIN acreditar.
+
+    Que el clic se haga no garantiza que Microsoft lo acredite: el clic en la
+    card dispara una petición del dashboard (server action con el offerId) y,
+    de vez en cuando, esa no cuenta aunque la pestaña se abra bien
+    (2026-11-12: Dubái se clicó correcto y quedó a 0/10; repitiendo el mismo
+    clic se acreditó al instante).
+
+    Repite las del conjunto diario en cada ronda y las de "Ganar" (more) solo en
+    la primera: alguna no se acredita nunca por esta vía (p.ej. "Deja que tu
+    creatividad brille", que pide crear algo) y no merece la pena insistir. Las
+    punch cards no se reintentan: van por goto y así no acreditan.
+
+    Devuelve las actividades que quedan pendientes (None si la API no respondió).
+    """
+    page = page or (context.pages[0] if context.pages else await context.new_page())
+    for attempt in range(1, rounds + 1):
+        remaining = await _remaining_activities(context, page)
+        sources = ("daily", "more") if (attempt == 1 and include_more) else ("daily",)
+        retry = [a for a in (remaining or []) if a.source in sources]
+        if not retry:
+            return remaining
+        log.info("sin acreditar (reintento %d/%d): %s", attempt, rounds,
+                 ", ".join(a.title[:40] for a in retry))
+        retry_daily = [a for a in retry if a.source == "daily"]
+        retry_more = [a for a in retry if a.source != "daily"]
+        for url, acts in ((REWARDS_URL, retry_daily), (EARN_URL, retry_more)):
+            if not acts:
+                continue
+            if not await safe_goto(page, url, attempts=3, timeout=25_000):
+                continue
+            # Recarga completa: deja que la SPA hidrate antes de clicar (sin
+            # hidratar, el clic abre la pestaña pero no envía la acreditación).
+            await sleep_jitter(4.0, 7.0)
+            await _wait_for_activity_anchors(page)
+            await _process_activities(page, context, acts)
+    return await _remaining_activities(context, page)
+
+
+async def _remaining_activities(context: BrowserContext, page: Page) -> list | None:
+    """Actividades aún pendientes según la API (None si no respondió)."""
+    try:
+        await sleep_jitter(2.0, 4.0)  # margen para que la acreditación se refleje
+        if "rewards." not in (page.url or ""):
+            await safe_goto(page, REWARDS_URL, attempts=3, timeout=20_000)
+            await sleep_jitter(2.0, 4.0)
+        after = await dashboard_api.fetch_dashboard(context, navigate=False)
+        return dashboard_api.pending_activities(after) if after else None
+    except Exception as exc:
+        log.debug("no se pudo re-consultar la API: %s", exc)
+        return None

@@ -361,6 +361,7 @@ def read_last_run() -> dict[str, Any]:
 _STATUS_STYLES: dict[str, tuple[str, str]] = {
     "ok": ("Completado", "#2ecc71"),
     "empty": ("Sin actividad", "#f39c12"),
+    "incomplete": ("Incompleto", "#f39c12"),
     "needs_relogin": ("Requiere login", "#e74c3c"),
     "selectors_broken": ("Selectores rotos", "#e67e22"),
     "error": ("Error", "#e74c3c"),
@@ -433,6 +434,13 @@ def format_status(last_run: dict[str, Any], task: dict[str, Any] | None = None) 
             )
         if last_run.get("daily_done") is not None:
             lines.append(f"Daily cards: {last_run['daily_done']}")
+        ver = last_run.get("verification")
+        if isinstance(ver, dict):
+            if ver.get("ok"):
+                lines.append("Verificación: todo acreditado ✓")
+            else:
+                falta = ", ".join(ver.get("retry") or []) or "?"
+                lines.append(f"Verificación: falta {falta}")
         if last_run.get("updated_at"):
             lines.append(f"Actualizado: {last_run['updated_at']}")
     else:

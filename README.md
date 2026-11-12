@@ -28,6 +28,15 @@ El instalador hace todo el trabajo:
 
 A partir de ahí, el bot se ejecuta solo cada día. Si ya completó las búsquedas hoy, sale al instante sin abrir nada.
 
+### Verificación antes de terminar
+
+Que el bot "haga" una actividad no garantiza que Microsoft la acredite. Antes de cerrar, el bot comprueba en Rewards cada cosa que hace y repite lo que falte (todo excepto lo de móvil):
+
+- **Búsquedas de PC:** lee el contador real (p. ej. `120/120`) y hace búsquedas nuevas, sin repetir consultas, hasta llegar al tope. El número de búsquedas también se calcula desde ese contador, no con una tabla por nivel.
+- **Conjunto diario y "Ganar":** vuelve a consultar la API y repite las actividades que sigan sin acreditar.
+- **Búsqueda por imagen y racha de Edge:** las lee de la sección *Rachas* de `/earn`; la búsqueda por imagen se repite si no consta.
+- Deja un resumen `=== VERIFICACIÓN FINAL ===` en el log. Si falta algo importante (búsquedas, conjunto diario o búsqueda por imagen), **no da el día por terminado** y la tarea lo reintenta en 30 min (máx. 3 corridas al día). Las tarjetas de sellos y alguna actividad de "Ganar" no se pueden acreditar desde el bot: se informan, pero no provocan reintentos.
+
 ### No molesta mientras usas el PC
 
 - **Sin ventanas de consola:** la tarea arranca `pythonw.exe`, que se relanza como `python.exe` con consola invisible (`ms_rewards/quiet.py`). Nada de lo que lanza después (git, el driver del navegador…) puede abrir una ventana ni robar el foco.
