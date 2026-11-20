@@ -56,11 +56,14 @@ def _remove_state() -> None:
 def _remove_credentials() -> None:
     """Borra las credenciales cifradas (state/credentials.bin)."""
     print("[*] Borrando credenciales cifradas...")
+    found = False
     if config.CREDENTIALS_PATH.exists():
         credentials.delete()
-        print("  OK.")
-    else:
-        print("  No existían. Nada que hacer.")
+        found = True
+    if config.APP_TOKEN_PATH.exists():      # permiso de la app de Bing
+        config.APP_TOKEN_PATH.unlink()
+        found = True
+    print("  OK." if found else "  No existían. Nada que hacer.")
 
 
 def _remove_profile() -> None:

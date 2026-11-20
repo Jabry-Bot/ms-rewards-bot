@@ -33,10 +33,15 @@ try:
 except ImportError:
     splash = None
 
+try:
+    from common import access, access_ui
+except ImportError:
+    import access  # type: ignore
+    import access_ui  # type: ignore
+
 
 # Sin ventanas de consola para los subprocesos que capturamos.
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 
 # Colores para estados del checklist.
 COLOR_OK = "#3ad17a"
@@ -91,13 +96,41 @@ class App(ctk.CTk):
         self.refresh_tools()
         self.after(100, self._drain_log)
 
+        # Código de acceso: sin uno válido el instalador no hace nada. Si este
+        # equipo ya estaba activado (reinstalación), no se vuelve a pedir.
+        self._access_ok = access.is_activated(self.paths.rewards_dir / "state")
+
         # Splash animado con el logo al abrir.
         if splash is not None:
             splash.play(self, on_done=self._after_splash,
                         title="ms_rewards", subtitle="Instalador")
+        elif not self._access_ok:
+            self.withdraw()
+            self.after(0, self._ask_access)
+
+    def _ask_access(self) -> None:
+        access_ui.ask_code(self, on_ok=self._on_access_ok, on_cancel=self._on_close)
+
+    def _on_access_ok(self) -> None:
+        self._access_ok = True
+        self._save_activation()
+        self._after_splash()
+
+    def _save_activation(self) -> None:
+        """Guarda la activación en cuanto existe la carpeta del bot (antes de
+        clonar aún no existe: se guarda al terminar ese paso)."""
+        if not self._access_ok or not self.paths.has_source:
+            return
+        try:
+            access.activate(self.paths.rewards_dir / "state")
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"[WARN] No se pudo guardar la activación: {exc}")
 
     def _after_splash(self) -> None:
         """Reaparece la ventana principal cuando el splash termina."""
+        if not self._access_ok:
+            self._ask_access()
+            return
         try:
             self.deiconify()
             self.lift()
@@ -186,20 +219,32 @@ class App(ctk.CTk):
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
 
+        # Navegador del bot (antes se preguntaba en una consola).
+        browser_row = ctk.CTkFrame(actions, fg_color="transparent")
+        browser_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        ctk.CTkLabel(browser_row, text="Navegador del bot:",
+                     font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+        self.browser_switch = ctk.CTkSegmentedButton(browser_row, values=["Chrome", "Edge"])
+        self.browser_switch.pack(side="left", padx=(10, 10))
+        current = os.environ.get("MSR_BROWSER", "chrome").strip().lower()
+        self.browser_switch.set("Edge" if current == "edge" else "Chrome")
+        ctk.CTkLabel(browser_row, text="Edge da más puntos (bonus y racha de Edge).",
+                     text_color="#9aa4b2", font=ctk.CTkFont(size=12)).pack(side="left")
+
         self.btn_install = ctk.CTkButton(
             actions, text="⚙ Instalar todo", height=46,
             font=ctk.CTkFont(size=16, weight="bold"),
             command=self._start_install,
         )
-        self.btn_install.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.btn_install.grid(row=1, column=0, sticky="ew", padx=(0, 6))
 
         self.btn_configure = ctk.CTkButton(
-            actions, text="👤 Configurar cuenta y registrar tarea", height=46,
+            actions, text="👤 Iniciar sesión y registrar tarea", height=46,
             font=ctk.CTkFont(size=14, weight="bold"),
             fg_color="#2b6f4e", hover_color="#235b40",
             command=self._start_configure,
         )
-        self.btn_configure.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.btn_configure.grid(row=1, column=1, sticky="ew", padx=(6, 0))
 
         # Barra de estado.
         self.status_label = ctk.CTkLabel(
@@ -371,7 +416,7 @@ class App(ctk.CTk):
 
     # --- Secuencia de instalación ----------------------------------------
     def _start_install(self) -> None:
-        if self._busy:
+        if self._busy or not self._access_ok:
             return
         self._set_busy(True)
         self._set_status("Instalando…")
@@ -391,11 +436,11 @@ class App(ctk.CTk):
 
         if ok:
             self._set_status("Instalación completada.")
-            self._log("\n✅ Instalación completada. Ya puedes configurar la cuenta.")
+            self._log("\n✅ Instalación completada. Ya puedes iniciar sesión.")
             self.after(0, lambda: messagebox.showinfo(
                 "ms_rewards",
-                "Instalación completada.\n\nAhora pulsa "
-                "«Configurar cuenta y registrar tarea».",
+                "Instalación completada.\n\nElige el navegador y pulsa "
+                "«Iniciar sesión y registrar tarea».",
             ))
 
     def _fail(self, summary: str, detail: str) -> None:
@@ -516,6 +561,8 @@ class App(ctk.CTk):
                 return False
             self._log(f"   OK — repo clonado en {self.install_root}.")
 
+        self._save_activation()   # ya existe ms_rewards/: guardar la activación
+
         # --- [5/8] venv --------------------------------------------------
         self._log("\n[5/8] Entorno virtual (.venv)")
         if self.paths.venv_ready:
@@ -547,7 +594,7 @@ class App(ctk.CTk):
         self._log("   OK — dependencias instaladas.")
 
         # --- [7/8] drivers patchright (no aborta) ------------------------
-        # El navegador se elige más tarde en setup_cli.py, así que instalamos
+        # El navegador se elige en la propia ventana (y se puede cambiar en el panel): instalamos
         # los drivers de AMBOS (chrome y edge) para cubrir cualquier elección.
         self._log("\n[7/8] Drivers de patchright (chrome + edge)")
         for browser in ("chrome", "edge"):
@@ -576,16 +623,15 @@ class App(ctk.CTk):
                           "puedes bajarlo del release manualmente.")
 
         if panel_exe.exists():
-            shortcut = boot.desktop_shortcut_path()
             rc = self.run_and_capture(
-                boot.create_shortcut_cmd(
+                boot.create_panel_shortcuts_cmd(
                     self.paths.venv_py, self.paths.winutil,
-                    panel_exe, shortcut, self.paths.base))
+                    panel_exe, self.paths.base))
             if rc == 0:
-                self._log(f"   Acceso directo creado en el Escritorio: {shortcut}")
+                self._log("   OK — accesos directos en el Escritorio y en el menú Inicio.")
             else:
-                self._log(f"   [WARN] No se pudo crear el acceso directo "
-                          f"(código {rc}); puedes crearlo manualmente.")
+                self._log(f"   [WARN] No se pudieron crear los accesos directos "
+                          f"(código {rc}); el panel está en {panel_exe}.")
 
         return True
 
@@ -639,7 +685,7 @@ class App(ctk.CTk):
 
     # --- Paso final: configurar cuenta + registrar tarea -----------------
     def _start_configure(self) -> None:
-        if self._busy:
+        if self._busy or not self._access_ok:
             return
         if not self.paths.venv_ready:
             messagebox.showwarning(
@@ -647,8 +693,10 @@ class App(ctk.CTk):
                 "El entorno virtual aún no está listo. Pulsa «Instalar todo» primero.",
             )
             return
+        # Leído aquí (hilo de UI): el worker no debe tocar widgets de Tk.
+        self._browser_choice = "edge" if self.browser_switch.get() == "Edge" else "chrome"
         self._set_busy(True)
-        self._set_status("Configurando cuenta…")
+        self._set_status("Esperando a que inicies sesión en el navegador…")
         threading.Thread(target=self._configure_worker, daemon=True).start()
 
     def _configure_worker(self) -> None:
@@ -665,59 +713,52 @@ class App(ctk.CTk):
         if ok:
             self._set_status("Configuración completada.")
             if getattr(self, "_login_pending", False):
-                self._log("\n✅ Tarea registrada. ⚠ Falta confirmar el login: "
-                          "ábrelo desde el panel («Login manual») para completar el 2FA.")
+                self._log("\n✅ Tarea registrada. ⚠ Falta iniciar sesión: "
+                          "hazlo desde el panel con «Login manual».")
                 self.after(0, lambda: messagebox.showinfo(
                     "ms_rewards",
                     "¡Instalación finalizada!\n\nLa tarea programada quedó "
-                    "registrada y el bot correrá automáticamente.\n\nEso sí, el "
-                    "login no llegó a confirmarse (2FA/captcha pendiente): abre el "
-                    "panel y pulsa «Login manual» para terminar de iniciar sesión.",
+                    "registrada y el bot correrá automáticamente.\n\nEso sí, no se "
+                    "detectó el inicio de sesión: abre el panel (acceso directo en el "
+                    "Escritorio o en el menú Inicio) y pulsa «Login manual».",
                 ))
             else:
-                self._log("\n✅ ¡Todo listo! Cuenta configurada y tarea registrada.")
+                self._log("\n✅ ¡Todo listo! Sesión iniciada y tarea registrada.")
                 self.after(0, lambda: messagebox.showinfo(
                     "ms_rewards",
-                    "¡Instalación finalizada!\n\nLa cuenta está configurada y la "
-                    "tarea programada quedó registrada. El bot correrá automáticamente.",
+                    "¡Instalación finalizada!\n\nSesión iniciada y tarea programada "
+                    "registrada: el bot correrá automáticamente cada día.\n\n"
+                    "El panel está en el Escritorio y en el menú Inicio "
+                    "(«ms_rewards Panel»).",
                 ))
 
     def _run_configure(self) -> bool:
-        # 1) Configuración interactiva en CONSOLA NUEVA (input/getpass/2FA).
-        self._log("\nAbriendo ventana de configuración…")
-        self._log("   (rellena los datos en la consola nueva; espera a que termine)")
-        try:
-            proc = subprocess.Popen(
-                [str(self.paths.venv_py), str(self.paths.setup_cli)],
-                cwd=str(self.paths.rewards_dir),
-                creationflags=CREATE_NEW_CONSOLE,
-            )
-            self.proc = proc
-            proc.wait()
-            rc = proc.returncode
-        except Exception as exc:  # noqa: BLE001
-            self._fail("No se pudo abrir la configuración interactiva.", str(exc))
-            return False
-        finally:
-            self.proc = None
+        # 1) Inicio de sesión en el navegador, sin consola: setup_cli corre
+        #    oculto (su salida va a este log) y abre la ventana del navegador
+        #    para que la persona entre ella misma. No se pide ni guarda contraseña.
+        browser = getattr(self, "_browser_choice", "chrome")
+        self._log(f"\nAbriendo {browser.capitalize()} para iniciar sesión…")
+        self._log("   Entra con tu cuenta Microsoft en la ventana que se abre "
+                  "(incluido el 2FA). Se detecta sola al terminar.")
+        rc = self.run_and_capture(
+            boot.setup_cli_cmd(self.paths.venv_py, self.paths.setup_cli, browser),
+            cwd=str(self.paths.rewards_dir))
 
-        # setup_cli devuelve: 0 = todo OK; 2 = config guardada pero login no
-        # confirmado (2FA/captcha pendiente); 1 (u otro) = fallo real (email
-        # vacío, no se pudo limpiar la sesión…). El login pendiente NO debe
-        # impedir registrar la tarea: el bot reintentará el login en cada
-        # corrida con las credenciales guardadas, y el usuario puede completar
-        # el 2FA luego desde el panel. Solo abortamos ante un fallo real.
+        # setup_cli devuelve: 0 = sesión iniciada; 2 = configurado pero sin
+        # login detectado (ventana cerrada / tiempo agotado); 1 = no se pudo
+        # limpiar el perfil. El login pendiente NO impide registrar la tarea:
+        # se completa luego con «Login manual» en el panel.
         self._login_pending = rc == 2
         if rc not in (0, 2):
-            self._fail("La configuración de la cuenta no finalizó correctamente.",
-                       f"setup_cli devolvió código {rc}.")
+            self._fail("No se pudo preparar la cuenta.",
+                       f"setup_cli devolvió código {rc}. Cierra el navegador del "
+                       "bot y vuelve a intentarlo.")
             return False
         if self._login_pending:
-            self._log("   ⚠ Login no confirmado (2FA/captcha pendiente), pero la "
-                      "configuración se guardó. Registro la tarea igualmente; "
-                      "completa el login luego desde el panel.")
+            self._log("   ⚠ No se detectó el inicio de sesión. Registro la tarea "
+                      "igualmente; inicia sesión luego desde el panel.")
         else:
-            self._log("   OK — configuración de cuenta completada.")
+            self._log("   OK — sesión iniciada.")
 
         # 2) Registrar la Scheduled Task en Python puro (winutil, sin PowerShell).
         self._log("\nRegistrando la tarea programada…")

@@ -1,8 +1,8 @@
 """
 Verificación final de la corrida: antes de cerrar el navegador comprueba en
 Microsoft Rewards que todo lo que hace el bot se ha acreditado DE VERDAD y
-repite lo que haya quedado a medias. Lo de móvil (la racha de la app de Bing)
-se excluye: el bot no lo hace.
+repite lo que haya quedado a medias. Lo de la app de Bing (check-in y Leer
+para ganar) solo se informa, y solo si está activado (cuenta vinculada).
 
 Por qué: "hecho" en el log no significa "acreditado". Ejemplos reales:
   - 2026-11-12: la card de Dubái del conjunto diario se clicó bien pero quedó
@@ -48,8 +48,18 @@ _STREAK_KEYS = [
     (re.compile(r"aplicaci[oó]n|\bapp\b|m[oó]vil|mobile", re.I), "app"),
     (re.compile(r"b[uú]squeda|search", re.I), "search"),
 ]
+_STREAK_NAMES = {"search": "búsqueda", "daily_set": "conjunto diario", "edge": "Edge",
+                 "app": "app de Bing", "visual": "búsqueda visual"}
 _STREAK_TITLE = re.compile(r"^(racha de|.*\bstreak\b)", re.I)
 _METRIC = re.compile(r"^[^\d:]{3,30}:\s*(\d+)\s*/\s*(\d+)\s*$")
+_DAY = re.compile(r"^(?:d[ií]a|day)\s*(\d+)\s*/\s*(\d+)$", re.I)
+# Barra de "Sellos recopilados" de /earn (aria-valuenow / aria-valuemax).
+_STAMPS_JS = """() => {
+  const el = [...document.querySelectorAll('[role=progressbar][aria-label]')]
+    .find(e => /sello|stamp/i.test(e.getAttribute('aria-label')));
+  return el ? [Number(el.getAttribute('aria-valuenow')),
+               Number(el.getAttribute('aria-valuemax'))] : null;
+}"""
 
 
 def parse_streaks(text: str) -> dict[str, tuple[int, int]]:
@@ -75,21 +85,55 @@ def parse_streaks(text: str) -> dict[str, tuple[int, int]]:
     return out
 
 
-async def read_streaks(context: BrowserContext) -> dict[str, tuple[int, int]]:
-    """Carga /earn y lee las rachas (espera a que la SPA las pinte)."""
+def parse_streak_days(text: str) -> dict[str, tuple[int, int]]:
+    """{clave: (día, largo)} de cada racha: la línea "Día 3/7" de su bloque."""
+    out: dict[str, tuple[int, int]] = {}
+    current: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if _STREAK_TITLE.match(line):
+            current = next((k for rx, k in _STREAK_KEYS if rx.search(line)), None)
+            continue
+        m = _DAY.match(line)
+        if m and current and current not in out:
+            out[current] = (int(m.group(1)), int(m.group(2)))
+    return out
+
+
+async def read_earn(context: BrowserContext) -> dict[str, Any]:
+    """
+    Carga /earn (espera a que la SPA pinte las rachas) y devuelve
+    {"streaks": {clave: (a, b)}, "days": {clave: (día, largo)},
+     "stamps": (sellos, para_bonus) | None}.
+    """
     page = context.pages[0] if context.pages else await context.new_page()
+    empty: dict[str, Any] = {"streaks": {}, "days": {}, "stamps": None}
     if not await safe_goto(page, EARN_URL, attempts=3, timeout=25_000):
-        return {}
+        return empty
+    text = ""
     streaks: dict[str, tuple[int, int]] = {}
     for _ in range(10):
         await asyncio.sleep(1.5)
         try:
-            streaks = parse_streaks(await page.evaluate("() => document.body.innerText"))
+            text = await page.evaluate("() => document.body.innerText")
+            streaks = parse_streaks(text)
         except Exception:
             streaks = {}
         if "visual" in streaks or "edge" in streaks:
             break
-    return streaks
+    stamps = None
+    try:
+        got = await page.evaluate(_STAMPS_JS)
+        if isinstance(got, list) and len(got) == 2 and all(isinstance(x, (int, float)) for x in got):
+            stamps = (int(got[0]), int(got[1]))
+    except Exception:
+        pass
+    return {"streaks": streaks, "days": parse_streak_days(text), "stamps": stamps}
+
+
+async def read_streaks(context: BrowserContext) -> dict[str, tuple[int, int]]:
+    """Solo las métricas de las rachas de /earn (ver read_earn)."""
+    return (await read_earn(context))["streaks"]
 
 
 def _ok(pair: tuple[int, int] | None) -> bool:
@@ -115,7 +159,8 @@ def searches_needed(pc: tuple[int, int, int] | None, margin: int = 1) -> int | N
 
 # --- Verificación + recuperación ------------------------------------------
 async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
-                         do_searches: bool, searches_used: int) -> dict[str, Any]:
+                         do_searches: bool, searches_used: int,
+                         app: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Comprueba cada actividad, repite las que falten y deja un resumen en el log.
     Devuelve un dict serializable para last_run.json.
@@ -155,7 +200,8 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
 
     # 3) Rachas de /earn: búsqueda por imagen y Edge. Si la búsqueda por imagen
     #    no consta, se repite una vez.
-    streaks = await read_streaks(context)
+    earn = await read_earn(context)
+    streaks = earn["streaks"]
     if do_searches and "visual" in streaks and not _ok(streaks["visual"]):
         log.info("búsqueda por imagen sin acreditar (%s) — repitiéndola",
                  _fmt(streaks["visual"]))
@@ -163,7 +209,8 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
             await run_visual_search(context)
         except Exception as exc:
             log.warning("reintento de búsqueda por imagen falló: %s", exc)
-        streaks = await read_streaks(context) or streaks
+        earn = await read_earn(context)
+        streaks = earn["streaks"] or streaks
 
     # 4) Estado final según la API.
     dash = await dashboard_api.fetch_dashboard(context, navigate=True)
@@ -187,7 +234,7 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
                      + ("todo ✓" if not pend_more else
                         f"{len(pend_more)} sin acreditar: {', '.join(t[:40] for t in pend_more)}"))
         if pend_punch:
-            lines.append(f"tarjetas de sellos: {len(pend_punch)} pendientes "
+            lines.append(f"promociones con tareas (Spotify, Duolingo…): {len(pend_punch)} pendientes "
                          "(el bot no puede acreditarlas visitándolas)")
     if do_searches:
         lines.append(f"búsqueda por imagen: {_fmt(streaks.get('visual'))}")
@@ -197,6 +244,14 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
         lines.append("racha de Edge: omitida (navegador Chrome; requiere Edge)")
     if "search" in streaks:
         lines.append(f"racha de búsqueda: {_fmt(streaks.get('search'))}")
+    if app is not None:
+        lines.extend(app_lines(app, streaks.get("app")))
+    if earn["days"]:
+        lines.append("rachas: " + ", ".join(f"{_STREAK_NAMES.get(k, k)} día {d}/{n}"
+                                           for k, (d, n) in earn["days"].items()))
+    if earn["stamps"]:
+        have, need = earn["stamps"]
+        lines.append(f"sellos: {have}/{need} (al completarlos, bonificación de puntos)")
     for line in lines:
         log.info("  %s", line)
 
@@ -226,6 +281,25 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
         "pending_punch": len(pend_punch),
         "visual": list(streaks["visual"]) if "visual" in streaks else None,
         "edge": list(streaks["edge"]) if "edge" in streaks else None,
+        "app_streak": list(streaks["app"]) if "app" in streaks else None,
+        "streak_days": {k: list(v) for k, v in earn["days"].items()},
+        "stamps": list(earn["stamps"]) if earn["stamps"] else None,
         "ok": not retry,
     })
     return summary
+
+
+def app_lines(app: dict[str, Any], streak: tuple[int, int] | None) -> list[str]:
+    """Líneas del resumen para las actividades de la app de Bing (opcionales).
+    No provocan reintentos: si fallan, otra corrida no lo arregla."""
+    if not app.get("linked"):
+        return ["app de Bing: sin vincular — ejecuta 'run.py --link-app' una vez"]
+    ci = (app.get("checkin") or {}).get("status")
+    rd = app.get("read") or {}
+    prog = rd.get("progress")
+    read_txt = _fmt(tuple(prog)) if prog else str(rd.get("status") or "?")
+    return [
+        "app de Bing — check-in: " + ("✓" if ci in ("ok", "done") else f"✗ ({ci})"),
+        f"app de Bing — Leer para ganar: {read_txt}",
+        f"racha de la app de Bing: {_fmt(streak)}",
+    ]

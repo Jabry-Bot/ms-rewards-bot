@@ -24,6 +24,7 @@ from pathlib import Path
 
 import config
 import credentials
+import runstate
 from launcher import launch, shutdown_chrome
 from login import perform_login, is_session_alive
 
@@ -102,8 +103,22 @@ def reset_session() -> bool:
             config.LAST_RUN_PATH.unlink()
     except Exception:
         pass
+    try:
+        # El permiso de la app de Bing es de la cuenta ANTERIOR: si se quedara,
+        # el check-in y las lecturas seguirían yendo a esa cuenta.
+        config.APP_TOKEN_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
     print("  OK.")
     return True
+
+
+async def browser_fresh_login() -> bool:
+    """Tras el reset: abre el navegador del bot y espera a que el usuario
+    inicie sesión él mismo (no se guarda ninguna contraseña)."""
+    from login import browser_login  # noqa: PLC0415
+    async with launch(visible=True) as ctx:
+        return await browser_login(ctx)
 
 
 async def fresh_login(email: str, password: str) -> bool:
@@ -141,7 +156,25 @@ def main() -> int:
     if not reset_session():
         return 1
 
-    # 4) Credenciales nuevas + login forzado
+    # 4a) --browser (lo que usa el panel): el usuario inicia sesión a mano en
+    #     la ventana del navegador; no se pide ni se guarda la contraseña.
+    if "--browser" in sys.argv[1:]:
+        print("[4/4] Abriendo el navegador para iniciar sesión con la cuenta nueva…")
+        try:
+            ok = asyncio.run(browser_fresh_login())
+        except Exception as exc:
+            log.exception("login en el navegador falló: %s", exc)
+            ok = False
+        if ok:
+            runstate.clear_relogin_failures()
+        print("\n" + "=" * 60)
+        print(" Cuenta cambiada correctamente. Sesión nueva guardada." if ok else
+              " No se detectó el inicio de sesión (ventana cerrada o tiempo agotado).\n"
+              " Vuelve a pulsar «Cambiar cuenta» o usa «Login manual».")
+        print("=" * 60)
+        return 0 if ok else 2
+
+    # 4b) Modo antiguo: credenciales por stdin + login forzado
     print("[4/4] Cuenta nueva:")
     email = input("  Email de la cuenta Microsoft: ").strip()
     if not email:

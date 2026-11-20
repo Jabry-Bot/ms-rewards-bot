@@ -21,6 +21,7 @@ Se usa de dos formas:
 from __future__ import annotations
 
 import json
+import os
 import logging
 import random
 import sys
@@ -239,8 +240,36 @@ def create_shortcut(target: str, shortcut: str, workdir: str) -> None:
     sc = shell.CreateShortcut(str(shortcut))
     sc.TargetPath = str(target)
     sc.WorkingDirectory = str(workdir)
+    sc.IconLocation = f"{target},0"
+    sc.Description = "Panel de control de ms_rewards"
     sc.Save()
     log.info("acceso directo creado: %s", shortcut)
+
+
+PANEL_SHORTCUT_NAME = "ms_rewards Panel.lnk"
+
+
+def special_folder(name: str) -> str:
+    """Carpeta especial real del usuario ("Desktop", "Programs"…). Respeta el
+    Escritorio redirigido a OneDrive, a diferencia de ~/Desktop."""
+    import win32com.client  # type: ignore
+    return str(win32com.client.Dispatch("WScript.Shell").SpecialFolders(name))
+
+
+def create_panel_shortcuts(target: str, workdir: str) -> list[str]:
+    """Accesos directos al panel en el Escritorio y en el menú Inicio."""
+    made: list[str] = []
+    for folder in ("Desktop", "Programs"):
+        try:
+            base = special_folder(folder)
+            if not base:
+                continue
+            lnk = os.path.join(base, PANEL_SHORTCUT_NAME)
+            create_shortcut(target, lnk, workdir)
+            made.append(lnk)
+        except Exception as exc:
+            log.warning("no se pudo crear el acceso directo en %s: %s", folder, exc)
+    return made
 
 
 # --- Variables de entorno persistentes (winreg HKCU\Environment) ---------
@@ -374,6 +403,14 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             create_shortcut(args[1], args[2], args[3])
             return 0
+        if cmd == "panel-shortcuts":
+            if len(args) < 3:
+                print("uso: winutil.py panel-shortcuts <target> <workdir>")
+                return 2
+            made = create_panel_shortcuts(args[1], args[2])
+            for lnk in made:
+                print(f"acceso directo: {lnk}")
+            return 0 if made else 1
         if cmd == "env-set":
             if len(args) < 3:
                 print("uso: winutil.py env-set <NOMBRE> <valor>")

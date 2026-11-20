@@ -98,6 +98,30 @@ def create_shortcut_cmd(
     ]
 
 
+def create_panel_shortcuts_cmd(
+    venv_python: str | os.PathLike,
+    winutil: str | os.PathLike,
+    target: str | os.PathLike,
+    workdir: str | os.PathLike,
+) -> list[str]:
+    """
+    Accesos directos al panel en el Escritorio Y en el menú Inicio. winutil
+    resuelve las carpetas reales (Escritorio redirigido a OneDrive incluido).
+    """
+    return [str(venv_python), str(winutil), "panel-shortcuts", str(target), str(workdir)]
+
+
+def setup_cli_cmd(
+    venv_python: str | os.PathLike, setup_cli: str | os.PathLike, browser: str
+) -> list[str]:
+    """Configura la cuenta sin consola: abre el navegador para que la persona
+    inicie sesión ella misma (no se pide ni guarda la contraseña)."""
+    browser = (browser or "").strip().lower()
+    if browser not in ("chrome", "edge"):
+        raise ValueError(f"navegador desconocido: {browser!r}")
+    return [str(venv_python), str(setup_cli), "--browser", browser]
+
+
 def install_task_cmd(
     venv_python: str | os.PathLike, winutil: str | os.PathLike
 ) -> list[str]:

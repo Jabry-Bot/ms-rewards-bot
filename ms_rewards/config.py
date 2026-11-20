@@ -5,6 +5,31 @@ import os
 import socket
 from pathlib import Path
 
+
+def load_dotenv(path: Path) -> None:
+    """
+    Carga un .env local (KEY=valor por línea; '#' comenta) en os.environ sin
+    pisar lo que ya venga del entorno. Para la configuración que solo existe en
+    una máquina, como el modo maintainer con IA local (ver .env.example).
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# .env en la raíz del repo (o junto a este archivo). Nunca va a git.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 # Navegador a usar: "chrome" o "edge". Ambos son Chromium, así que el bot
 # funciona igual; Edge además otorga el bonus de búsquedas de Microsoft Rewards.
 VALID_BROWSERS = ("chrome", "edge")
@@ -127,6 +152,14 @@ STATE_DIR = _HERE / "state"
 STATE_DIR.mkdir(exist_ok=True)
 LAST_RUN_PATH = STATE_DIR / "last_run.json"
 CREDENTIALS_PATH = STATE_DIR / "credentials.bin"
+
+# Actividades de la app de Bing (check-in + Leer para ganar) por la API de la
+# app. Opcionales: se activan al vincular la cuenta (`run.py --link-app`, que
+# guarda state/app_token.bin). MSR_APP_ACTIVITIES=0 las apaga aunque esté
+# vinculada; =1 las fuerza (y avisa en el log si falta vincular).
+APP_TOKEN_PATH = STATE_DIR / "app_token.bin"
+_APP_ENV = os.getenv("MSR_APP_ACTIVITIES", "").strip()
+APP_ACTIVITIES = _APP_ENV == "1" or (_APP_ENV == "" and APP_TOKEN_PATH.exists())
 
 # --- Modo maintainer ---
 # Solo la máquina del maintainer (tú) ejecuta el flujo de auto-heal con LLM.

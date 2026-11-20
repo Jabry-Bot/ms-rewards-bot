@@ -144,7 +144,7 @@ async def _ensure_session(context) -> bool:
     log.warning("sesión caducada o no iniciada — intentando autologin")
     creds = credentials.load()
     if not creds:
-        log.error("no hay credenciales guardadas (ejecuta setup.bat)")
+        log.error("sesión caducada y sin credenciales guardadas: inicia sesión con «Login manual» en el panel")
         return False
     email, password = creds
     ok = await login_mod.perform_login(context, email, password, interactive=False)
@@ -203,6 +203,7 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         except Exception as exc:
             log.warning("no se pudo leer info de cuenta: %s", exc)
 
+        app_task: asyncio.Task | None = None
         if do_daily:
             log.info("=== DAILY SET ===")
             try:
@@ -210,6 +211,12 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
                 log.info("daily set: %d cards", daily_done)
             except Exception as exc:
                 log.exception("daily set falló: %s", exc)
+
+            # --- App de Bing (check-in + Leer para ganar), opcional: va EN
+            #     PARALELO con las búsquedas. Solo habla con la API de la app
+            #     (no usa el navegador), así que no alarga la corrida. ---
+            if config.APP_ACTIVITIES:
+                app_task = await _start_app_task(context, log)
 
             if do_searches:
                 gap = random.uniform(30.0, 90.0)
@@ -262,12 +269,20 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         except Exception as exc:
             log.exception("racha de Edge falló: %s", exc)
 
+        # --- App de Bing: esperar a que acaben las lecturas (normalmente ya
+        #     terminaron durante las búsquedas) ---
+        if app_task is not None:
+            try:
+                info["app"] = await app_task
+            except Exception as exc:
+                log.exception("actividades de la app de Bing fallaron: %s", exc)
+
         # --- Verificación final: comprobar en Rewards que todo se acreditó y
-        #     repetir lo que falte (excepto lo de móvil) antes de terminar ---
+        #     repetir lo que falte antes de terminar ---
         try:
             ver = await verify.verify_and_fix(
                 context, do_daily=do_daily, do_searches=do_searches,
-                searches_used=searches_used)
+                searches_used=searches_used, app=info.get("app"))
             info["verification"] = ver
             searches_done += int(ver.get("extra_searches") or 0)
         except Exception as exc:
@@ -297,6 +312,23 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         await sleep_jitter(4.0, 9.0)
 
     return searches_done, visual_search_done, daily_done, info
+
+
+async def _start_app_task(context, log) -> asyncio.Task | None:
+    """
+    Lanza las actividades de la app de Bing como tarea en segundo plano.
+
+    Lo único que usa el navegador (mirar en /earn si el check-in de hoy ya
+    consta) se hace aquí, ANTES de las búsquedas; la tarea va sin contexto para
+    no abrir pestañas ni navegar mientras se busca.
+    """
+    try:
+        import app_rewards  # noqa: PLC0415
+        done = await app_rewards.checkin_done_on_web(context)
+        return asyncio.create_task(app_rewards.run_app_activities(done_today=done))
+    except Exception as exc:
+        log.exception("no se pudieron lanzar las actividades de la app de Bing: %s", exc)
+        return None
 
 
 async def _post_run_heal() -> list[str]:
@@ -356,6 +388,63 @@ def _setup_mode() -> None:
             pass
 
 
+def access_granted(log) -> bool:
+    """True si este equipo está activado (common/access.py, en la raíz del repo)."""
+    from pathlib import Path  # noqa: PLC0415
+    root = str(Path(__file__).resolve().parent.parent)
+    if root not in sys.path:
+        sys.path.append(root)     # al final: ms_rewards/selectors.py no tapa la stdlib
+    try:
+        from common import access  # noqa: PLC0415
+        if access.is_activated(config.STATE_DIR):
+            return True
+    except Exception as exc:
+        log.warning("no se pudo comprobar la activación: %s", exc)
+    log.warning("este equipo no está activado: abre el panel e introduce el código "
+                "de acceso. El bot no se ejecuta hasta entonces.")
+    return False
+
+
+def _ensure_panel_shortcuts(log) -> None:
+    """
+    Una sola vez por instalación: accesos directos al panel en el Escritorio y
+    en el menú Inicio. Lo dispara el panel al abrirse (--update-only), así les
+    llega también a quienes instalaron antes y no van a repetir el setup.
+    """
+    from pathlib import Path  # noqa: PLC0415
+    flag = config.STATE_DIR / "shortcuts.done"
+    panel = Path(__file__).resolve().parent.parent / "MsRewardsPanel.exe"
+    if flag.exists() or not panel.exists():
+        return
+    try:
+        import winutil  # noqa: PLC0415
+        made = winutil.create_panel_shortcuts(str(panel), str(panel.parent))
+        if made:
+            flag.write_text("\n".join(made), encoding="utf-8")
+            log.info("accesos directos del panel creados: %s", ", ".join(made))
+    except Exception as exc:
+        log.warning("no se pudieron crear los accesos directos del panel: %s", exc)
+
+
+def _app_mode(log, *, link: bool) -> int:
+    """--link-app (vincular, ventana para iniciar sesión) / --app-only (ejecutar)."""
+    import app_rewards  # noqa: PLC0415
+    if link:
+        log.info("vinculando la app de Bing: inicia sesión en la ventana que se abre "
+                 "(se cierra sola al terminar)")
+        try:
+            ok = asyncio.run(app_rewards.link_in_new_window())
+        except Exception as exc:
+            log.error("la vinculación de la app de Bing falló: %s", exc)
+            return 1
+        log.info("app de Bing vinculada ✓" if ok else
+                 "no se completó la vinculación (ventana cerrada o tiempo agotado)")
+        return 0 if ok else 1
+    result = asyncio.run(app_rewards.run_app_activities())
+    runstate.write(app=app_rewards.summarize(result))   # para el panel
+    return 0 if result.get("linked") else 1
+
+
 # Corridas automáticas seguidas sin sesión antes de dejar de intentarlo ese día
 # (hace falta login manual desde el panel; no tiene sentido abrir el navegador
 # cada 30 min para nada).
@@ -392,6 +481,11 @@ def main() -> int:
                              "(segundo plano, para que no moleste)")
     parser.add_argument("--update-only", action="store_true",
                         help="solo comprueba/aplica el auto-update (git pull) y sale")
+    parser.add_argument("--link-app", action="store_true",
+                        help="vincula la app de Bing (check-in + Leer para ganar): abre "
+                             "una ventana para iniciar sesión una vez")
+    parser.add_argument("--app-only", action="store_true",
+                        help="solo las actividades de la app de Bing (no usa el navegador)")
     args = parser.parse_args()
 
     _setup_logging()
@@ -410,15 +504,26 @@ def main() -> int:
                 log.info("sin actualizaciones (VERSION=%s)", updater.current_version())
         except Exception as exc:
             log.warning("auto-update falló: %s", exc)
+        _ensure_panel_shortcuts(log)
         return 0
 
     if args.kill:
         shutdown_chrome()
         return 0
 
+    # Solo corre en equipos activados con un código de acceso (se mete en el
+    # panel o en el instalador). --update-only y --kill quedan fuera a propósito.
+    if not access_granted(log):
+        return 0
+
     if args.setup:
         _setup_mode()
         return 0
+
+    # La app de Bing no usa el perfil del navegador del bot: va antes del lock
+    # y puede convivir con una corrida en marcha.
+    if args.link_app or args.app_only:
+        return _app_mode(log, link=args.link_app)
 
     # Lock de instancia única: si ya hay otra corrida sobre este perfil
     # (típicamente los dos triggers de la Scheduled Task solapándose), salimos
@@ -522,12 +627,17 @@ def _main_locked(args, log) -> int:
     if daily_mod.broken_selectors:
         runstate.mark_selectors_broken([b["key"] for b in daily_mod.broken_selectors])
     ver = info.get("verification")
+    extra = {}
+    if "app" in info:
+        import app_rewards  # noqa: PLC0415
+        extra["app"] = app_rewards.summarize(info["app"])
     runstate.write(
         level=info.get("level"),
         points_before=info.get("points_before"),
         points_after=info.get("points_after"),
         visual_search_done=visual_search_done,
         verification=ver,
+        **extra,
     )
     if ver is not None:
         # La verificación manda: el día solo se da por completado si lo

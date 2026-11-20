@@ -20,3 +20,7 @@ dist/
 *.spec
 # binarios empaquetados (se distribuyen vía GitHub Releases, no en git)
 *.exe
+
+# configuración local de cada máquina (modo maintainer con IA local…)
+.env
+ms_rewards/.env

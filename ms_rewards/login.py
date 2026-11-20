@@ -194,3 +194,59 @@ async def _interactive_wait(context: BrowserContext) -> bool:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, input)
     return await is_session_alive(context)
+
+
+# --- Login a mano en el navegador (sin contraseña guardada) ---------------
+REWARDS_API = "https://rewards.bing.com/api/getuserinfo?type=1"
+
+
+async def _api_signed_in(context: BrowserContext) -> bool:
+    """¿Hay sesión de Rewards? Pregunta a la API con las cookies del contexto,
+    sin tocar la pestaña en la que el usuario está escribiendo."""
+    try:
+        r = await context.request.get(REWARDS_API, timeout=15_000)
+        if not r.ok:
+            return False
+        data = await r.json()
+    except Exception:
+        return False
+    dash = data.get("dashboard") if isinstance(data, dict) else None
+    status = dash.get("userStatus") if isinstance(dash, dict) else None
+    return isinstance(status, dict) and isinstance(status.get("availablePoints"), int)
+
+
+async def browser_login(context: BrowserContext, *, timeout_s: float = 900,
+                        poll_s: float = 4.0) -> bool:
+    """
+    Abre Rewards en la ventana del bot y espera a que el USUARIO inicie sesión
+    él mismo (email, contraseña y 2FA en la propia ventana). El bot no escribe
+    nada: solo detecta cuándo hay sesión. True si se completa a tiempo.
+    """
+    page = context.pages[0] if context.pages else await context.new_page()
+    await safe_goto(page, REWARDS_HOME, attempts=3, timeout=25_000)
+    if await _api_signed_in(context):
+        print(">> Ya había una sesión iniciada.", flush=True)
+        return True
+    # Atajo: pulsar «Iniciar sesión» para dejar al usuario en el formulario.
+    try:
+        btn = await page.query_selector(selectors.get("rewards.signin_button"))
+        if btn and await btn.is_visible():
+            await btn.click()
+    except Exception:
+        pass
+    print(">> Inicia sesión con tu cuenta Microsoft en la ventana del navegador "
+          "(incluido el 2FA si te lo pide). Se detecta sola al terminar.", flush=True)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        await asyncio.sleep(poll_s)
+        if await _api_signed_in(context):
+            return True
+        # Si el login acabó en la página de la cuenta Microsoft, la sesión ya
+        # existe pero Rewards aún no tiene sus cookies: llevarle allí.
+        try:
+            if "account.microsoft.com" in (page.url or ""):
+                await safe_goto(page, REWARDS_HOME, attempts=2, timeout=20_000)
+        except Exception:
+            pass
+    return False

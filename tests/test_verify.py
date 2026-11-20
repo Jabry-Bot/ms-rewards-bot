@@ -128,3 +128,12 @@ def test_panel_muestra_verificacion():
     mal = core.format_status({"status": "incomplete",
                               "verification": {"ok": False, "retry": ["búsquedas de PC"]}})
     assert "Incompleto" in mal and "búsquedas de PC" in mal
+
+
+def test_dias_de_cada_racha():
+    d = verify.parse_streak_days(EARN_TEXT)
+    assert d == {"search": (7, 7), "daily_set": (2, 7), "edge": (2, 7),
+                 "app": (1, 7), "visual": (4, 7)}
+    # "Día 7 de una racha de 7 días completada." no es la línea del día.
+    assert verify.parse_streak_days("Racha de Búsqueda de Bing\nDía 7 de una racha de 7 días completada.") == {}
+    assert verify.parse_streak_days("") == {}
