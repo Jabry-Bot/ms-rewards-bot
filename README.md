@@ -1,4 +1,4 @@
-# ms_rewards
+# Jab-rewards
 
 Bot de Microsoft Rewards auto-arrancable, multi-usuario y con auto-reparación de selectores.
 
@@ -19,7 +19,7 @@ El instalador hace todo el trabajo:
 - Crea `.venv` e instala dependencias (`patchright`, `httpx`, `pywin32`).
 - **Sin consolas ni preguntas:** en la propia ventana eliges el **navegador** (`Chrome` o `Edge`; **Edge da más puntos**: bonus de búsquedas y racha de Edge) y pulsas **«Iniciar sesión y registrar tarea»**.
 - Se abre el navegador del bot y **tú inicias sesión** con tu cuenta Microsoft (incluido el 2FA). El instalador lo detecta solo. **No se pide ni se guarda ninguna contraseña**: la sesión queda guardada en el perfil del bot durante semanas o meses, y si algún día caduca se renueva con **Login manual** en el panel.
-- Crea los accesos directos **«ms_rewards Panel»** en el **Escritorio** y en el **menú Inicio**.
+- Crea los accesos directos **«Jab-rewards»** en el **Escritorio** y en el **menú Inicio**.
 - Registra una Scheduled Task `MsRewardsBot` que arranca al iniciar sesión + diariamente a una hora aleatoria entre las 10:00 y las 14:00, y se reintenta cada 30 min durante unas horas.
 
 A partir de ahí, el bot se ejecuta solo cada día. Si ya completó las búsquedas hoy, sale al instante sin abrir nada.

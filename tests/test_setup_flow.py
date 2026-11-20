@@ -137,7 +137,7 @@ def test_accesos_directos_en_escritorio_y_menu_inicio(monkeypatch, tmp_path):
     monkeypatch.setattr(winutil, "create_shortcut", lambda t, lnk, w: made.append(lnk))
     out = winutil.create_panel_shortcuts("C:/x/MsRewardsPanel.exe", "C:/x")
     assert [Path(p).parent.name for p in out] == ["Desktop", "Programs"]
-    assert all(Path(p).name == "ms_rewards Panel.lnk" for p in out) and out == made
+    assert all(Path(p).name == "Jab-rewards.lnk" for p in out) and out == made
 
 
 def test_bootstrap_panel_shortcuts_cmd():
@@ -159,4 +159,17 @@ def test_run_crea_los_accesos_una_sola_vez(monkeypatch, tmp_path):
     log = logging.getLogger("t")
     run._ensure_panel_shortcuts(log)
     run._ensure_panel_shortcuts(log)
-    assert len(calls) == 1 and (tmp_path / "shortcuts.done").is_file()
+    assert len(calls) == 1 and (tmp_path / "shortcuts-v2.done").is_file()
+
+
+def test_renombrar_quita_los_accesos_viejos(monkeypatch, tmp_path):
+    for folder in ("Desktop", "Programs"):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "ms_rewards Panel.lnk").write_bytes(b"x")
+    monkeypatch.setattr(winutil, "special_folder", lambda name: str(tmp_path / name))
+    monkeypatch.setattr(winutil, "create_shortcut",
+                        lambda t, lnk, w: Path(lnk).write_bytes(b"lnk"))
+    winutil.create_panel_shortcuts("C:/x/MsRewardsPanel.exe", "C:/x")
+    for folder in ("Desktop", "Programs"):
+        assert (tmp_path / folder / "Jab-rewards.lnk").is_file()
+        assert not (tmp_path / folder / "ms_rewards Panel.lnk").exists()

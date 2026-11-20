@@ -56,7 +56,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.title("ms_rewards — Instalador")
+        self.title("Jab-rewards — Instalador")
         self.geometry("760x640")
         self.minsize(680, 560)
         try:
@@ -103,7 +103,7 @@ class App(ctk.CTk):
         # Splash animado con el logo al abrir.
         if splash is not None:
             splash.play(self, on_done=self._after_splash,
-                        title="ms_rewards", subtitle="Instalador")
+                        title="Jab-rewards", subtitle="Instalador")
         elif not self._access_ok:
             self.withdraw()
             self.after(0, self._ask_access)
@@ -150,7 +150,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="Instalador de ms_rewards",
+            text="Instalador de Jab-rewards",
             font=ctk.CTkFont(size=26, weight="bold"),
         ).grid(row=0, column=0, sticky="w")
 
@@ -438,7 +438,7 @@ class App(ctk.CTk):
             self._set_status("Instalación completada.")
             self._log("\n✅ Instalación completada. Ya puedes iniciar sesión.")
             self.after(0, lambda: messagebox.showinfo(
-                "ms_rewards",
+                "Jab-rewards",
                 "Instalación completada.\n\nElige el navegador y pulsa "
                 "«Iniciar sesión y registrar tarea».",
             ))
@@ -447,7 +447,7 @@ class App(ctk.CTk):
         """Loguea en rojo (conceptual) y muestra messagebox de error."""
         self._log(f"[ERROR] {summary}")
         self._set_status(f"Error: {summary}")
-        self.after(0, lambda: messagebox.showerror("ms_rewards — Error",
+        self.after(0, lambda: messagebox.showerror("Jab-rewards — Error",
                                                     f"{summary}\n\n{detail}"))
 
     def _run_install_steps(self) -> bool:
@@ -689,7 +689,7 @@ class App(ctk.CTk):
             return
         if not self.paths.venv_ready:
             messagebox.showwarning(
-                "ms_rewards",
+                "Jab-rewards",
                 "El entorno virtual aún no está listo. Pulsa «Instalar todo» primero.",
             )
             return
@@ -716,7 +716,7 @@ class App(ctk.CTk):
                 self._log("\n✅ Tarea registrada. ⚠ Falta iniciar sesión: "
                           "hazlo desde el panel con «Login manual».")
                 self.after(0, lambda: messagebox.showinfo(
-                    "ms_rewards",
+                    "Jab-rewards",
                     "¡Instalación finalizada!\n\nLa tarea programada quedó "
                     "registrada y el bot correrá automáticamente.\n\nEso sí, no se "
                     "detectó el inicio de sesión: abre el panel (acceso directo en el "
@@ -725,11 +725,11 @@ class App(ctk.CTk):
             else:
                 self._log("\n✅ ¡Todo listo! Sesión iniciada y tarea registrada.")
                 self.after(0, lambda: messagebox.showinfo(
-                    "ms_rewards",
+                    "Jab-rewards",
                     "¡Instalación finalizada!\n\nSesión iniciada y tarea programada "
                     "registrada: el bot correrá automáticamente cada día.\n\n"
                     "El panel está en el Escritorio y en el menú Inicio "
-                    "(«ms_rewards Panel»).",
+                    "(«Jab-rewards»).",
                 ))
 
     def _run_configure(self) -> bool:

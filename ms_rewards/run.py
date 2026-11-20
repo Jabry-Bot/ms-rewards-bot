@@ -412,7 +412,8 @@ def _ensure_panel_shortcuts(log) -> None:
     llega también a quienes instalaron antes y no van a repetir el setup.
     """
     from pathlib import Path  # noqa: PLC0415
-    flag = config.STATE_DIR / "shortcuts.done"
+    # v2: la app pasó a llamarse Jab-rewards; se rehacen una vez con el nombre nuevo.
+    flag = config.STATE_DIR / "shortcuts-v2.done"
     panel = Path(__file__).resolve().parent.parent / "MsRewardsPanel.exe"
     if flag.exists() or not panel.exists():
         return

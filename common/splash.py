@@ -38,7 +38,7 @@ def _asset(name: str) -> Path | None:
     return None
 
 
-def play(app, on_done, title: str = "ms_rewards", subtitle: str = "Microsoft Rewards") -> None:
+def play(app, on_done, title: str = "Jab-rewards", subtitle: str = "Microsoft Rewards") -> None:
     """Muestra el splash animado y llama on_done() al terminar."""
     try:
         app.withdraw()

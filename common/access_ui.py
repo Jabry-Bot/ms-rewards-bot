@@ -50,7 +50,7 @@ class CodeDialog(ctk.CTkToplevel):
         self._fails = 0
         self._locked_until = 0.0
         self._busy = False
-        self.title("ms_rewards")
+        self.title("Jab-rewards")
         self.resizable(False, False)
         # customtkinter pone su propio icono a los ~200 ms: poner el de la app después.
         try:

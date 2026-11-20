@@ -1,5 +1,5 @@
 """
-Panel de control de ms_rewards (customtkinter).
+Panel de control de Jab-rewards (customtkinter).
 
 Composición: a la izquierda, la columna de marca (medalla, saldo, nivel y las
 acciones secundarias); en el centro, el protagonista —el anillo del día con
@@ -477,7 +477,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=T.BG)
         T.resolve_fonts(self)
-        self.title("ms_rewards — Panel de control")
+        self.title("Jab-rewards — Panel de control")
         self._place_initial()
         self.minsize(T.MIN_W, T.MIN_H)
         try:
@@ -540,7 +540,7 @@ class App(ctk.CTk):
         self._activated = access.is_activated(core.STATE_DIR)
         if splash is not None:
             splash.play(self, on_done=self._after_splash,
-                        title="ms_rewards", subtitle="Panel de control")
+                        title="Jab-rewards", subtitle="Panel de control")
         elif not self._activated:
             self.withdraw()
             self.after(0, self._ask_access)
@@ -607,7 +607,7 @@ class App(ctk.CTk):
         brand.pack(fill="x", padx=T.S4, pady=(T.S3, 0))
         ctk.CTkLabel(brand, text="", image=W.load_logo(34), width=34, height=34).grid(
             row=0, column=0, rowspan=2, padx=(0, T.S3))
-        W.label(brand, "ms_rewards", font="brand", height=20).grid(
+        W.label(brand, "Jab-rewards", font="brand", height=20).grid(
             row=0, column=1, sticky="sw")
         version = core.build_version()
         W.label(brand, f"Panel · v{version}" if version else "Panel de control",
@@ -2031,7 +2031,7 @@ class App(ctk.CTk):
             access.activate(core.STATE_DIR)
         except Exception as exc:
             from tkinter import messagebox  # noqa: PLC0415
-            messagebox.showerror("ms_rewards", f"No se pudo guardar la activación:\n{exc}")
+            messagebox.showerror("Jab-rewards", f"No se pudo guardar la activación:\n{exc}")
             self._on_close()
             return
         self._activated = True

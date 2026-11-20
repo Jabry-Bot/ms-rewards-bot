@@ -1,1 +1,1 @@
-"""Instalador autocontenido de ms_rewards (setup.exe)."""
+"""Instalador autocontenido de Jab-rewards (setup.exe)."""

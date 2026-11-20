@@ -52,7 +52,7 @@ PANEL_EXE_URL = (
 )
 # Nombre del acceso directo que se crea en el Escritorio (para que el usuario
 # encuentre el panel sin rebuscar en la carpeta de instalación).
-SHORTCUT_NAME = "ms_rewards Panel.lnk"
+SHORTCUT_NAME = "Jab-rewards.lnk"
 
 
 def icon_path() -> Path | None:

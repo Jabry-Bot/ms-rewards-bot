@@ -77,7 +77,7 @@ def _scheduler():
 #   v2: repetición cada 30 min en ambos triggers (reintentos si se pospuso por
 #       juego a pantalla completa o falló la sesión).
 TASK_SCHEMA = "v2"
-_TASK_DESC = f"Microsoft Rewards bot (auto-run diario) [{TASK_SCHEMA}]"
+_TASK_DESC = f"Jab-rewards: bot de Microsoft Rewards (auto-run diario) [{TASK_SCHEMA}]"
 
 # Reintentos: tras cada disparo, la tarea se repite cada RETRY_INTERVAL durante
 # un rato. Si el día ya está hecho, run.py sale en ~1 s sin abrir nada; si hay
@@ -241,12 +241,14 @@ def create_shortcut(target: str, shortcut: str, workdir: str) -> None:
     sc.TargetPath = str(target)
     sc.WorkingDirectory = str(workdir)
     sc.IconLocation = f"{target},0"
-    sc.Description = "Panel de control de ms_rewards"
+    sc.Description = "Panel de control de Jab-rewards"
     sc.Save()
     log.info("acceso directo creado: %s", shortcut)
 
 
-PANEL_SHORTCUT_NAME = "ms_rewards Panel.lnk"
+PANEL_SHORTCUT_NAME = "Jab-rewards.lnk"
+# Nombre anterior (hasta v3.0.0): se borra al crear los nuevos.
+OLD_PANEL_SHORTCUT_NAMES = ("ms_rewards Panel.lnk",)
 
 
 def special_folder(name: str) -> str:
@@ -267,6 +269,11 @@ def create_panel_shortcuts(target: str, workdir: str) -> list[str]:
             lnk = os.path.join(base, PANEL_SHORTCUT_NAME)
             create_shortcut(target, lnk, workdir)
             made.append(lnk)
+            for old_name in OLD_PANEL_SHORTCUT_NAMES:     # renombrado: quitar el viejo
+                old = os.path.join(base, old_name)
+                if os.path.exists(old):
+                    os.remove(old)
+                    log.info("acceso directo antiguo eliminado: %s", old)
         except Exception as exc:
             log.warning("no se pudo crear el acceso directo en %s: %s", folder, exc)
     return made
