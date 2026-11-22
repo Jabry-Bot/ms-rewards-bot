@@ -177,7 +177,8 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
     searches_used = 0  # consultas de hoy ya usadas (offset para las extra)
     visual_search_done = False
     daily_done = 0
-    info: dict = {"level": None, "points_before": None, "points_after": None}
+    info: dict = {"level": None, "points_before": None, "points_after": None,
+                  "redeemed": 0}
     async with launch(visible=visible) as context:
         # Pequeña pausa inicial humanizada
         await sleep_jitter(3.0, 7.0)
@@ -300,11 +301,16 @@ async def _run(do_daily: bool, do_searches: bool, visible: bool = True) -> tuple
         try:
             ui2 = await rewards_info.get_user_info(context)
             info["points_after"] = ui2.get("points")
+            # Un canje hecho a mano a mitad de la corrida baja el saldo: no es
+            # que se hayan perdido puntos, se suma aparte (rewards_info lo apuntó).
+            if ui2.get("redeemed"):
+                info["redeemed"] = int(ui2["redeemed"]["price"])
             if info["points_before"] is not None and info["points_after"] is not None:
-                gain = info["points_after"] - info["points_before"]
+                gain = info["points_after"] - info["points_before"] + info["redeemed"]
                 log.info(
-                    "puntos: %s → %s (ganados hoy en esta sesión: %+d)",
+                    "puntos: %s → %s (ganados hoy en esta sesión: %+d%s)",
                     info["points_before"], info["points_after"], gain,
+                    f"; canje de {info['redeemed']}" if info["redeemed"] else "",
                 )
         except Exception:
             pass
@@ -636,6 +642,7 @@ def _main_locked(args, log) -> int:
         level=info.get("level"),
         points_before=info.get("points_before"),
         points_after=info.get("points_after"),
+        redeemed=info.get("redeemed") or 0,     # canje a mitad de la sesión
         visual_search_done=visual_search_done,
         verification=ver,
         **extra,

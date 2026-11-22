@@ -561,7 +561,12 @@ def format_status(last_run: dict[str, Any], task: dict[str, Any] | None = None) 
         if last_run.get("points_after") is not None:
             pa = last_run.get("points_after")
             pb = last_run.get("points_before")
-            if pb is not None:
+            gain = session_gain(last_run)
+            if gain is not None:
+                red = last_run.get("redeemed")
+                extra = f", canje de {red}" if type(red) is int and red > 0 else ""
+                lines.append(f"Puntos: {pb} → {pa}  ({gain:+d}{extra})")
+            elif pb is not None:
                 lines.append(f"Puntos: {pb} → {pa}  ({pa - pb:+d})")
             else:
                 lines.append(f"Puntos: {pa}")
@@ -1010,6 +1015,16 @@ def day_summary(last_run: dict[str, Any], task: dict[str, Any] | None = None, *,
                 "Pulsa «Ejecutar ahora» si no hay ninguna en marcha.")
 
 
+def session_gain(last_run: dict[str, Any]) -> int | None:
+    """Puntos ganados en la última sesión: saldo final − inicial + lo canjeado
+    a mitad de sesión (`redeemed`, lo apunta el bot). None si falta algún saldo."""
+    pa, pb = (last_run or {}).get("points_after"), (last_run or {}).get("points_before")
+    if type(pa) is not int or type(pb) is not int:
+        return None
+    red = (last_run or {}).get("redeemed")
+    return pa - pb + (red if type(red) is int and red > 0 else 0)
+
+
 def kpi_tiles(last_run: dict[str, Any], today: str | None = None,
               now: datetime | None = None) -> list[dict[str, str]]:
     """
@@ -1027,9 +1042,8 @@ def kpi_tiles(last_run: dict[str, Any], today: str | None = None,
 
     gained = {"key": "gained", "label": "Ganados hoy", "tone": "neutral", "value": "—",
               "sub": "Aún sin corrida hoy" if has else "Sin datos todavía"}
-    if (ran_today(last_run, today) and isinstance(pa, int) and isinstance(pb, int)
-            and not isinstance(pa, bool) and not isinstance(pb, bool)):
-        delta = pa - pb
+    delta = session_gain(last_run)
+    if ran_today(last_run, today) and delta is not None:
         gained.update(value=format_delta(delta), tone="ok" if delta > 0 else "neutral",
                       sub=f"{format_points(pb)} → {format_points(pa)}")
 
@@ -1160,6 +1174,10 @@ def log_line_kind(line: str) -> str:
 # se mira cada salto entre una lectura y la siguiente:
 #   · si el saldo sube, la subida se apunta al día de la lectura posterior;
 #   · si baja, es un canje: no resta de lo ganado (se anota en "redeemed");
+#   · una línea "canje en Rewards: N pts" (el bot la escribe justo antes del
+#     saldo cuando el último pedido de la cuenta es de después de la lectura
+#     anterior) apunta N como canje y lo descuenta del saldo previo: así, un
+#     canje hecho a mano a mitad de corrida no se come lo ganado ese día;
 #   · una subida imposible (> MAX_PLAUSIBLE_GAIN) es un cambio de cuenta: se
 #     ignora.
 # Es decir, "diferencia entre lecturas consecutivas", no "último − primero del
@@ -1175,15 +1193,21 @@ _MONTHS_FULL_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio
                    "agosto", "septiembre", "octubre", "noviembre", "diciembre")
 # De "puntos: A → B" solo interesa B: A ya salió antes en su propia lectura y
 # repetirlo detrás de B parecería un canje seguido de otra subida.
-_LOG_BALANCE = re.compile(r"\bpuntos: \d+ → (\d+)|\bpuntos=(\d+)")
+_LOG_BALANCE = re.compile(
+    r"\bpuntos: \d+ → (\d+)|\bpuntos=(\d+)|\bcanje en Rewards: (\d+) pts")
 _log_cache: dict[str, tuple[tuple[float, int], list[int]]] = {}
 
 
 def parse_log_balances(text: str) -> list[int]:
     """Saldos que aparecen en el texto de un log diario, en orden. Las lecturas
-    a 0 (fallo de la API) se descartan."""
+    a 0 (fallo de la API) se descartan. Un canje apuntado por el bot va como
+    número NEGATIVO (−puntos canjeados) en su sitio de la secuencia."""
     out: list[int] = []
     for m in _LOG_BALANCE.finditer(text or ""):
+        if m.group(3):
+            if int(m.group(3)) > 0:
+                out.append(-int(m.group(3)))
+            continue
         value = int(m.group(1) or m.group(2))
         if value > 0:
             out.append(value)
@@ -1241,7 +1265,8 @@ def points_history(balances: dict[str, list[int]], today: date | None = None,
     Historial diario (función pura) de los últimos `days` días, del más antiguo
     a hoy. Cada día: {"date", "gained": int | None (None = sin log ese día),
     "balance": último saldo | None, "redeemed": puntos canjeados, "bonus": bool}.
-    Ver arriba cómo se reparte lo ganado. `bonus` marca los días muy por encima
+    En `balances`, un número negativo es un canje apuntado (ver
+    parse_log_balances), no un saldo. Ver arriba cómo se reparte lo ganado. `bonus` marca los días muy por encima
     de lo normal: al menos BONUS_MIN y el doble de la mediana de los días con
     puntos.
     """
@@ -1258,7 +1283,12 @@ def points_history(balances: dict[str, list[int]], today: date | None = None,
                 value = int(value)
             except (TypeError, ValueError):
                 continue
-            if value <= 0:
+            if value < 0:                       # canje apuntado por el bot
+                redeemed[day] = redeemed.get(day, 0) - value
+                if prev is not None:
+                    prev += value
+                continue
+            if value == 0:
                 continue
             gained.setdefault(day, 0)
             if prev is not None:

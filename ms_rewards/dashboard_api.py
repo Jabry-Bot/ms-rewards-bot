@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from patchright.async_api import BrowserContext, Page
@@ -161,11 +161,38 @@ def daily_set_status(dashboard: dict) -> tuple[int, int] | None:
     return sum(1 for p in items if p.get("complete")), len(items)
 
 
+def parse_last_order(dashboard: dict) -> dict[str, Any] | None:
+    """
+    Último canje de la cuenta (userStatus.lastOrder): {'id', 'price', 'title',
+    'at'} con `at` en datetime con zona, o None si no hay o no se entiende.
+    `price` es lo que se pagó de verdad (con descuentos), no el de catálogo.
+    """
+    order = _user_status(dashboard).get("lastOrder")
+    if not isinstance(order, dict):
+        return None
+    price = order.get("price")
+    if type(price) is not int or price <= 0:
+        return None
+    raw = str(order.get("timestamp") or "")
+    # .NET manda 7 decimales de segundo; fromisoformat solo quiere hasta 6.
+    raw = re.sub(r"(\.\d{6})\d+", r"\1", raw).replace("Z", "+00:00")
+    try:
+        at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    item = order.get("catalogItem") if isinstance(order.get("catalogItem"), dict) else {}
+    title = str(item.get("title") or order.get("sku") or "").strip()
+    return {"id": str(order.get("id") or ""), "price": price, "title": title, "at": at}
+
+
 def parse_user_info(dashboard: dict) -> dict[str, Any]:
-    """{'level', 'level_name', 'points', 'source'} desde el dict dashboard."""
+    """{'level', 'level_name', 'points', 'source', 'pc_search', 'last_order'}
+    desde el dict dashboard."""
     if not dashboard:
         return {"level": None, "level_name": None, "points": None, "source": None,
-                "pc_search": None}
+                "pc_search": None, "last_order": None}
     level, name = parse_level(dashboard)
     return {
         "level": level,
@@ -173,6 +200,7 @@ def parse_user_info(dashboard: dict) -> dict[str, Any]:
         "points": parse_points(dashboard),
         "source": "api" if (level or parse_points(dashboard) is not None) else None,
         "pc_search": parse_pc_search(dashboard),
+        "last_order": parse_last_order(dashboard),
     }
 
 

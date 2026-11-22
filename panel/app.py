@@ -1517,10 +1517,7 @@ class App(ctk.CTk):
                           for i in items)
         done = sum(1 for i in items if i["state"] == "ok")
         ran = core.ran_today(lr, today)
-        value = None
-        pa, pb = lr.get("points_after"), lr.get("points_before")
-        if ran and type(pa) is int and type(pb) is int:
-            value = pa - pb
+        value = core.session_gain(lr) if ran else None
         if self._history and self._history[-1]["date"] == today:
             logged = self._history[-1]["gained"]
             if logged is not None and (ran or logged > 0):
