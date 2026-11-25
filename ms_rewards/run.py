@@ -340,7 +340,9 @@ async def _start_app_task(context, log) -> asyncio.Task | None:
 async def _post_run_heal() -> list[str]:
     """
     Si hay selectores rotos y estamos en modo maintainer, dispara healer.heal
-    por cada uno. Devuelve la lista de claves que se intentaron reparar.
+    por cada uno. Devuelve la lista de claves que se REPARARON (vacía si esta
+    máquina no es maintainer: antes devolvía las rotas y el log decía
+    «healer reparó» sin haber reparado nada).
     """
     log = logging.getLogger("run")
     broken = list(daily_mod.broken_selectors)
@@ -352,7 +354,7 @@ async def _post_run_heal() -> list[str]:
             "maintainer; espera la publicación del fix",
             [b["key"] for b in broken],
         )
-        return [b["key"] for b in broken]
+        return []
 
     import healer  # import diferido — sólo el maintainer carga httpx/Ollama
     fixed = []

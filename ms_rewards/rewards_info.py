@@ -99,8 +99,9 @@ async def get_user_info(context: BrowserContext) -> dict[str, Any]:
             info["redeemed"] = order
             log.info(format_redemption(order))
         log.info(
-            "nivel=%s (%s) puntos=%s [API]",
-            info.get("level"), info.get("level_name"), info.get("points"),
+            "nivel=%s (%s) puntos=%s [%s]",
+            info.get("level"), info.get("level_name") or f"nivel {info.get('level')}",
+            info.get("points"), "API" if info.get("source") == "api" else "web",
         )
         if info.get("points") is not None:
             _write_seen(now, order["id"] if order else logged_id)

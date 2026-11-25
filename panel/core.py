@@ -1006,9 +1006,13 @@ def day_summary(last_run: dict[str, Any], task: dict[str, Any] | None = None, *,
         return _out("warn", "warning", "Hecho, pero con avisos",
                     "Rewards ha cambiado algo en su web y puede faltar alguna "
                     "actividad.")
+    auto = ("Mañana se ejecutará solo." if task else
+            "Registra la tarea programada para que vaya solo cada día.")
+    unknown = ", ".join(str(u) for u in (ver.get("unknown") or []))
+    if completed and unknown:
+        return _out("warn", "warning", "Hecho, sin poder comprobarlo todo",
+                    f"Rewards no dejó leer: {unknown}. " + auto)
     if completed:
-        auto = ("Mañana se ejecutará solo." if task else
-                "Registra la tarea programada para que vaya solo cada día.")
         return _out("ok", "check", "Todo hecho por hoy",
                     "Todo acreditado en Rewards. " + auto)
     return _out("info", "clock", "La corrida de hoy no ha terminado",

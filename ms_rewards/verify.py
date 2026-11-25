@@ -265,8 +265,18 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
         retry.append("conjunto diario")
     if do_searches and "visual" in streaks and not _ok(streaks["visual"]):
         retry.append("búsqueda por imagen")
+    # Lo que Rewards no dejó leer: no se puede decir que esté acreditado (ni
+    # repetirlo a ciegas: serían otras 34 búsquedas en cada reintento).
+    unknown: list[str] = []
+    if do_searches and pc is None:
+        unknown.append("búsquedas de PC")
+    if do_daily and ds is None:
+        unknown.append("conjunto diario")
     if retry:
         log.warning("VERIFICACIÓN: sin completar: %s", ", ".join(retry))
+    elif unknown:
+        log.warning("VERIFICACIÓN: Rewards no dejó comprobar: %s (lo demás, "
+                    "acreditado)", ", ".join(unknown))
     elif any("✗" in ln or "sin acreditar" in ln for ln in lines):
         log.info("VERIFICACIÓN: lo principal está acreditado ✓ (lo que queda "
                  "pendiente no se puede completar desde el bot)")
@@ -275,6 +285,7 @@ async def verify_and_fix(context: BrowserContext, *, do_daily: bool,
 
     summary.update({
         "retry": retry,
+        "unknown": unknown,
         "daily_set": list(ds) if ds else None,
         "pending_daily": pend_daily,
         "pending_more": pend_more,

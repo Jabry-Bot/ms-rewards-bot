@@ -80,11 +80,21 @@ CHROME_PATH = os.getenv("MSR_CHROME_PATH") or (
 # Por defecto, el hostname. setup_cli.py puede hacer `setx MSR_USER_ID ...`.
 USER_ID = os.getenv("MSR_USER_ID", socket.gethostname()).strip() or socket.gethostname()
 
-# Perfil dedicado por usuario. Si existe el legacy `C:\Temp\MsRewardsCDP`
-# (instalaciones previas a la separación por usuario), se sigue usando para
-# no romper sesiones ya iniciadas.
+# Perfil dedicado por usuario. Si `C:\Temp\MsRewardsCDP` ya es un perfil de
+# navegador (instalaciones previas a la separación por usuario), se sigue usando
+# para no romper sesiones ya iniciadas. Se mira "Local State" y no solo que la
+# carpeta exista: el perfil por usuario vive DENTRO de ella, así que tras la
+# primera corrida la carpeta existía siempre y el bot saltaba a un perfil vacío
+# (se perdía el inicio de sesión hecho en el instalador).
 _LEGACY_PROFILE = Path(r"C:\Temp\MsRewardsCDP")
-_DEFAULT_PROFILE = _LEGACY_PROFILE if _LEGACY_PROFILE.exists() else _LEGACY_PROFILE / USER_ID
+
+
+def default_profile(legacy: Path, user_id: str) -> Path:
+    """Perfil por defecto: el legacy si ya es un perfil; si no, uno por usuario."""
+    return legacy if (legacy / "Local State").exists() else legacy / user_id
+
+
+_DEFAULT_PROFILE = default_profile(_LEGACY_PROFILE, USER_ID)
 USER_DATA_DIR = os.getenv("MSR_USER_DATA_DIR", str(_DEFAULT_PROFILE))
 
 CDP_PORT = int(os.getenv("MSR_CDP_PORT", "9333"))
